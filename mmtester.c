@@ -8,13 +8,14 @@
  * @copyright Copyright (c) 2025
  * 
  */
-#include "memlib.h"
-#include "mm.h"
+#include "memlib.h"    // memory system
+#include "mm.h"        // allocator
 
 #include <stddef.h>     // EXIT_SUCCESS
 
 int main()
 {
+   mem_init();
 
    return EXIT_SUCCESS;
 }
