@@ -61,10 +61,11 @@
 // Constants
 // =====================================
 
-#define WSIZE      4          // Word and header/footer size (bytes)
-#define DSIZE      8          // Double word size (bytes)
-#define ALIGNMENT  8          // Align on 8 byte boundaries
-#define CHUNKSIZE  ( 1<<12 )  // Extend heap by this amount (bytes)
+#define WSIZE          4          // Word and header/footer size (bytes)
+#define DSIZE          8          // Double word size (bytes)
+#define ALIGNMENT      8          // Align on 8 byte boundaries
+#define CHUNKSIZE      ( 1<<12 )  // Extend heap by this amount (bytes)
+#define MIN_BLOCK_SIZE 16         // The minimum block size, 8 byte payload and 8 byte header/footer
 
 
 // =====================================
@@ -105,8 +106,12 @@ static char* heap_listp = NULL;            // pointer to first block in heap?
 
 static void* extend_heap( size_t words );
 static void* coalesce( void* bp );
-static void* find( size_t block_size );
+static void* find_block( size_t block_size );
 static void  place( void* bp, size_t size );
+static void  heapcheck( int verbose );
+static void  blockcheck( void* bp );
+static void  printblock( void* bp );
+
 
 // =====================================
 // Public Function Definitions
@@ -127,13 +132,13 @@ void* mm_malloc( size_t size )
    
    size_t const block_size = ALIGN( size ) + DSIZE;
 
-   void* bp = find( block_size );
+   void* bp = find_block( block_size );
 
    if ( bp == NULL )
    {
       // What is our coalescence policy?  Depending on the policy, should we coalesce before extending the heap?
       size_t const extend = MAX( block_size, CHUNKSIZE );
-      if ( ( bp = extend_heap( extend ) ) == NULL )
+      if ( ( bp = extend_heap( extend / WSIZE ) ) == NULL )
          return NULL;
    }
    
@@ -196,7 +201,16 @@ void* mm_calloc( size_t num, size_t size )
  */
 void  mm_free( void* ptr )
 {
+   if ( ptr == NULL )
+      return;
 
+   char*  const bp   = ( char* )ptr;
+   size_t const size = GET_SIZE( HDRP( bp ) );
+
+   PUT( HDRP( bp ), PACK( size, 0 ) ); 
+   PUT( FTRP( bp ), PACK( size, 0 ) );
+
+   coalesce( bp );
 }
 
 
@@ -221,6 +235,7 @@ int mm_init()
    
    if ( extend_heap( CHUNKSIZE / WSIZE ) == NULL )
       return -1;
+
    return 0;
 }
 
@@ -229,7 +244,7 @@ int mm_init()
  * @brief  Extend heap with free block and return its block pointer
  * 
  * @param words    Number of words by which to extend the heap
- * @return void*   On success, pointer to free block
+ * @return void*   On success, pointer to new free block
  *                 On error, null pointer
  */
 static void* extend_heap( size_t words )
@@ -318,10 +333,27 @@ static void* coalesce( void* bp )
  * @param block_size  number of bytes required 
  * @return void*      On success, block pointer to free block of at least block_size bytes
  *                    On error, null pointer indicates request can not be satisfied
+ * 
+ * Implements a naive first fit algorithm that starts at heaplistp and ends when either
+ * a free block of sufficient size is found or we encounter the epilogue
  */
-static void* find( size_t block_size )
+static void* find_block( size_t block_size )
 {
+   char* bp = heap_listp;
 
+   size_t size;
+
+   while ( ( size = GET_SIZE( HDRP( bp ) ) ) != 0 )   // until we reach epilogue
+   {
+      if ( ( GET_ALLOC( HDRP( bp ) ) == 0 ) && size >= block_size )
+      {
+         return bp;
+      }
+
+      bp += size;
+   }
+
+   return NULL;
 }
 
 /**
@@ -333,5 +365,22 @@ static void* find( size_t block_size )
  */
 static void  place( void* bp, size_t size )
 {
-   
+   size_t const block_size = GET_SIZE( HDRP( bp ) );
+
+   if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
+   {
+      PUT( HDRP( bp ), PACK( size, 1 ) );
+      PUT( FTRP( bp ), PACK( size, 1 ) );
+      
+      char*  const next_bp   = NEXT_BLKP( bp );
+      size_t const next_size = block_size - size;
+
+      PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
+      PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
+   }
+   else
+   {
+      PUT( HDRP( bp ), PACK( block_size, 1 ) );
+      PUT( FTRP( bp ), PACK( block_size, 1 ) );
+   }
 }
