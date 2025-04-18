@@ -1,6 +1,6 @@
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=gnu11
+CFLAGS = -Wall -Wextra -g -std=gnu11 -O2
 
 # Target executable
 TARGET = program
