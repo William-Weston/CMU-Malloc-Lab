@@ -175,28 +175,115 @@ void* mm_malloc( size_t size )
    return bp;
 }
 
+
+/**
+ * @brief      Free a block of allocated memory
+ * 
+ * @param ptr  Pointer to allocated block of memory to be freed
+ */
+void  mm_free( void* ptr )
+{
+   if ( ptr == NULL )
+      return;
+
+   char*  const bp   = ( char* )ptr;
+   size_t const size = GET_SIZE( HDRP( bp ) );
+
+   PUT( HDRP( bp ), PACK( size, 0 ) ); 
+   PUT( FTRP( bp ), PACK( size, 0 ) );
+
+   coalesce( bp );
+}
+
+
 /**
  * @brief  Reallocates the given area of memory.
  * 
- * @param ptr     if ptr is not NULL, it must be previously allocated by mm_malloc, mm_calloc or mm_realloc and not yet freed
+ * @param ptr     if ptr is not NULL, it must be previously allocated by mm_malloc, mm_calloc 
+ *                or mm_realloc and not yet freed
  * @param size    number of bytes to allocate
  * @return void*  On success, returns the pointer to the beginning of newly allocated memory.
  *                On error, returns a null pointer
  * 
- * @details Reallocation is done by either:
- *             a) expanding or contracting the existing area pointed to by ptr, if possible. 
- *                The contents of the area remain unchanged up to the lesser of the new and old sizes. 
- *                If the area is expanded, the contents of the new part of the array are undefined.
- *             b) allocating a new memory block of size new_size bytes, copying memory area with size equal 
- *                the lesser of the new and the old sizes, and freeing the old block.
+ * The mm realloc routine returns a pointer to an allocated region of at least size bytes with 
+ * the following constraints:
  * 
- *          If there is not enough memory, the old memory block is not freed and null pointer is returned.
- *          If ptr is NULL, the behavior is the same as calling mm_malloc(new_size). 
+ *   – if ptr is NULL, the call is equivalent to mm_malloc(size);
+ *   – if size is equal to zero, the call is equivalent to mm_free(ptr);
+ *   – if ptr is not NULL, it must have been returned by an earlier call to mm_malloc, mm_calloc or mm_realloc
+ *     the call to mm_realloc changes the size of the memory block pointed to by ptr (the old block) 
+ *     to size bytes and returns the address of the new block.
+ * 
+ * Reallocation is done by either:
+ * 
+ *   a) expanding or contracting the existing area pointed to by ptr, if possible. 
+ *      the contents of the area remain unchanged up to the lesser of the new and old sizes. 
+ *      if the area is expanded, the contents of the new part of the array are undefined.
+ *   b) allocating a new memory block of size new_size bytes, copying memory area with size equal 
+ *      the lesser of the new and the old sizes, and freeing the old block.
+ * 
+ * If there is not enough memory, the old memory block is not freed and null pointer is returned.
+ *         
  */
 void* mm_realloc( void* ptr, size_t size )
 {
-   return NULL;
+   if ( size == 0 )
+   {
+      mm_free( ptr );
+      return ptr;
+   }
+
+   if ( ptr == NULL )
+      return mm_malloc( size );
+
+   size_t const block_size = ALIGN( size ) + DSIZE;
+   size_t const old_size   = GET_SIZE( HDRP( ptr ) );
+
+   if ( block_size == old_size )   // nothing to do
+      return ptr;
+   
+   if ( block_size < old_size )
+   {
+      place( ptr, block_size );
+      return ptr;
+   }
+   
+   // block_size > old_size
+   char*  const next_block = NEXT_BLKP( ptr );
+   size_t const next_size  = GET_SIZE( HDRP( next_block ) );
+   size_t const total_size = old_size + next_size;
+
+   // is the next block free and of sufficient size?
+   if ( !GET_ALLOC( HDRP( next_block ) ) &&  block_size <= total_size )
+   { 
+      if ( total_size - block_size >= MIN_BLOCK_SIZE )  // we can split
+      {
+         PUT( HDRP( ptr ), PACK( block_size, 1 ) );
+         PUT( FTRP( ptr ), PACK( block_size, 1 ) );
+         
+         char*  const next_bp   = NEXT_BLKP( ptr );
+         size_t const next_size = total_size - block_size;
+
+         PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
+         PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
+
+         coalesce( next_bp );
+      }
+      else
+      {
+         PUT( HDRP( ptr ), PACK( total_size, 1 ) );
+         PUT( FTRP( ptr ), PACK( total_size, 1 ) );
+      }
+      return ptr;
+   }
+
+   // must allocate and copy
+   void* new_ptr = mm_malloc( size );
+   memcpy( new_ptr, ptr, old_size - DSIZE );
+   mm_free( ptr );
+   return new_ptr;
 }
+
 
 /**
  * @brief Allocates memory for an array of num objects of size and initializes all bytes in the allocated storage to zero. 
@@ -216,28 +303,8 @@ void* mm_calloc( size_t num, size_t size )
       return NULL;
       
    memset( ptr, 0, bytes );
-   
+
    return ptr;
-}
-
-
-/**
- * @brief      Free a block of allocated memory
- * 
- * @param ptr  Pointer to allocated block of memory to be freed
- */
-void  mm_free( void* ptr )
-{
-   if ( ptr == NULL )
-      return;
-
-   char*  const bp   = ( char* )ptr;
-   size_t const size = GET_SIZE( HDRP( bp ) );
-
-   PUT( HDRP( bp ), PACK( size, 0 ) ); 
-   PUT( FTRP( bp ), PACK( size, 0 ) );
-
-   coalesce( bp );
 }
 
 
@@ -390,6 +457,8 @@ static void place( void* bp, size_t size )
 
       PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
       PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
+
+      coalesce( next_bp );
    }
    else
    {
