@@ -274,7 +274,7 @@ static void* extend_heap( size_t words )
    PUT( old_brk + size - DSIZE, PACK( size, 0 ) );    // free block footer
    PUT( old_brk + size - WSIZE, PACK( 0, 1 ) );       // new epilogue
 
-   return NULL;
+   return old_brk;
 }
 
 
@@ -406,7 +406,6 @@ static void place( void* bp, size_t size )
  */
 static void heapcheck( int verbose )
 {
-   
    {  // check prologue
       void* const prologuebp = (char*)heap_listp - DSIZE;
       if ( verbose )
