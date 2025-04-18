@@ -17,7 +17,7 @@
  *   |    /     \ /              \ /              \         /                  \       |
  *   |   |       |                |                |       |                    \     / \
  *   |---------------------------------------------         ------------------------------
- *   |   |8/1|8/1|hdr|        |ftr|hdr|        |ftr|  ...  |hrd|        |        |ftr|0/1|
+ *   |   |8/1|8/1|hdr|        |ftr|hdr|        |ftr|  ...  |hdr|        |        |ftr|0/1|
  *   |---------------------------------------------         ------------------------------
  *   |       |       |        |       |        |               |        |        |       |
  *   |       |       |        |       |        |               |        |        |       |
@@ -55,7 +55,7 @@
 #include "memlib.h"           // mem_sbrk
 
 #include <stdint.h>           // intptr_t, uint32_t, uintptr_t
-
+#include <stdio.h>            // printf
 
 // =====================================
 // Constants
@@ -97,7 +97,7 @@
 // Private Global Variables
 // =====================================
 
-static char* heap_listp = NULL;            // pointer to first block in heap? 
+static char* heap_listp = NULL;            // pointer to first block past prologue in heap
 
 
 // =====================================
@@ -110,12 +110,39 @@ static void* find_block( size_t block_size );
 static void  place( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
+static void  prologuecheck( void* bp );
 static void  printblock( void* bp );
 
 
 // =====================================
 // Public Function Definitions
 // =====================================
+
+
+/**
+ * @brief  Initialize the memory manager
+ * @return On success, returns 0
+ *         On error, returns -1
+ */
+int mm_init()
+{
+   // create initial heap
+   if ( ( heap_listp = mem_sbrk( 4 * WSIZE ) ) == ( void* )-1 )
+      return -1;
+
+   // create prologe and epilogue
+   PUT( heap_listp, 0 );                          // padding
+   PUT( heap_listp + WSIZE, PACK( 8, 1 ) );       // prologue header
+   PUT( heap_listp + 2 * WSIZE, PACK( 8, 1 ) );   // prologue footer
+   PUT( heap_listp + 3 * WSIZE, PACK( 0, 1 ) );   // epilogue header
+
+   heap_listp += 4 * WSIZE;
+   
+   if ( extend_heap( CHUNKSIZE / WSIZE ) == NULL )
+      return -1;
+
+   return 0;
+}
 
 
 /**
@@ -214,30 +241,15 @@ void  mm_free( void* ptr )
 }
 
 
-/**
- * @brief  Initialize the memory manager
- * @return On success, returns 0
- *         On error, returns -1
- */
-int mm_init()
+void mm_check_heap( int verbose )
 {
-   // create initial heap
-   if ( ( heap_listp = mem_sbrk( 4 * WSIZE ) ) == ( void* )-1 )
-      return -1;
-
-   // create prologe and epilogue
-   PUT( heap_listp, 0 );                          // padding
-   PUT( heap_listp + WSIZE, PACK( 8, 1 ) );       // prologue header
-   PUT( heap_listp + 2 * WSIZE, PACK( 8, 1 ) );   // prologue footer
-   PUT( heap_listp + 3 * WSIZE, PACK( 0, 1 ) );   // epilogue header
-
-   heap_listp += 4 * WSIZE;
-   
-   if ( extend_heap( CHUNKSIZE / WSIZE ) == NULL )
-      return -1;
-
-   return 0;
+   heapcheck( verbose );
 }
+
+
+// ================================================================================================
+//                                         Private
+// ================================================================================================
 
 
 /**
@@ -356,6 +368,7 @@ static void* find_block( size_t block_size )
    return NULL;
 }
 
+
 /**
  * @brief Place a block of size bytes at the start of the free block with the block pointer bp
  *        and split it if the excess would be at least equal to the minimum block size
@@ -363,7 +376,7 @@ static void* find_block( size_t block_size )
  * @param bp    block pointer to the free block
  * @param size  number of bytes to place in the free block
  */
-static void  place( void* bp, size_t size )
+static void place( void* bp, size_t size )
 {
    size_t const block_size = GET_SIZE( HDRP( bp ) );
 
@@ -384,3 +397,126 @@ static void  place( void* bp, size_t size )
       PUT( FTRP( bp ), PACK( block_size, 1 ) );
    }
 }
+
+
+/**
+ * @brief Check heap for consistency
+ * 
+ * @param verbose Print extra information
+ */
+static void heapcheck( int verbose )
+{
+   
+   {  // check prologue
+      void* const prologuebp = (char*)heap_listp - DSIZE;
+      if ( verbose )
+         printblock( prologuebp );
+
+      prologuecheck( prologuebp );
+   }
+
+   char* bp = NULL;
+
+   for ( bp = heap_listp; GET_SIZE( HDRP( bp ) ) > 0; bp = NEXT_BLKP( bp ) )
+   {
+      if ( verbose )
+         printblock( bp );
+
+      blockcheck( bp );
+   }
+
+   // epilogue
+   if ( verbose )
+      printblock( bp );
+
+   if ( GET_SIZE( HDRP( bp ) ) != 0 && GET_ALLOC( HDRP( bp ) ) != 0x1 )
+   {
+      printf( "Error: Bad epilogue\n");
+   }
+}
+
+
+/**
+ * @brief Check a given block for alignment and consistency between header and footer
+ * 
+ * @param bp Block pointer to block we will check
+ * 
+ * 
+ */
+static void blockcheck( void* bp )
+{
+   // address of bp should be aligned
+   if( ( (uintptr_t)bp % ALIGNMENT ) != 0 )
+   {
+      printf( "Error: %p is not %d byte aligned\n", bp, ALIGNMENT );
+   }
+
+   size_t const h_size = GET_SIZE( HDRP( bp ) );
+
+   if ( h_size < MIN_BLOCK_SIZE )
+   {
+      printf( "Error: Block size (%zu) is less than the minimum block size (%d)", h_size, MIN_BLOCK_SIZE );
+   }
+
+   if ( h_size % ALIGNMENT != 0 )
+   {
+      printf( "Error: Block size (%zu) is not %d byte aligned\n", h_size, ALIGNMENT );
+   }
+
+   if ( GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
+   {
+      printf( "Error: header does not match footer\n" );
+   }
+}
+
+
+/**
+ * @brief Check prologue block for appropriate format
+ * 
+ * @param bp Block pointer to prologue
+ */
+static void prologuecheck( void* bp )
+{
+   if ( ( (uintptr_t)bp % ALIGNMENT ) != 0 )
+   {
+      printf( "Error: Bad Prologue - %p is not %d byte aligned\n", bp, ALIGNMENT );
+      return;
+   }
+
+   size_t const h_size  = GET_SIZE( HDRP( bp ) );
+   size_t const f_size  = GET_SIZE( FTRP( bp ) );
+   size_t const h_alloc = GET_ALLOC( HDRP( bp ) );
+   size_t const f_alloc = GET_ALLOC( FTRP( bp ) );
+
+   if ( h_size != DSIZE || f_size != DSIZE || h_alloc != 0x1 || f_alloc != 0x1 )
+   {
+      printf( "Error: Bad Prologue\n");
+      printblock( bp );
+   }
+}
+
+
+/**
+ * @brief Print header and footer contents of a given block
+ * 
+ * @param bp Block pointer for whose contents we will print
+ */
+static void printblock( void* bp )
+{
+   size_t const h_size  = GET_SIZE( HDRP( bp ) );
+
+   if ( h_size == 0 )
+   {
+      printf( "%p: EOL\n", bp );       // epilogue 
+      return;
+   }
+
+   size_t const h_alloc = GET_ALLOC( HDRP( bp ) );
+   size_t const f_size  = GET_SIZE( FTRP( bp ) );
+   size_t const f_alloc = GET_ALLOC( FTRP( bp ) );
+
+   printf( "%p: header: [%zu:%c] - footer: [%zu:%c]\n", bp, 
+            h_size, ( h_alloc ? 'a' : 'f' ),
+            f_size, ( f_alloc ? 'a' : 'f' ) );
+}
+
