@@ -56,6 +56,7 @@
 
 #include <stdint.h>           // intptr_t, uint32_t, uintptr_t
 #include <stdio.h>            // printf
+#include <string.h>           // memset
 
 // =====================================
 // Constants
@@ -214,9 +215,8 @@ void* mm_calloc( size_t num, size_t size )
    if ( ptr == NULL )
       return NULL;
       
-   for ( size_t idx = 0; idx < bytes; ++idx )
-      ptr[idx] = 0;
-
+   memset( ptr, 0, bytes );
+   
    return ptr;
 }
 
