@@ -48,7 +48,7 @@
  *      |    Block Size      | a/f |   Footer  
  *      ----------------------------
  * 
- * Block Pointers (bp): point to the first byte of the payload 
+ * Block Payload Pointer (bp): point to the first byte of the payload 
  * 
  */
 #include "mm.h"
