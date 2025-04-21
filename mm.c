@@ -10,17 +10,20 @@
  * ------------------------------------------------------------------------------------------------
  * 
  * Implementation of allocator using an implicit free list
+ * Version 2: Optimization
+ *    - footer only needed in free blocks
+ *    - add a previous allcated bit to the block format
  * 
  *        prologue                                                                  epilogue  
- * start    / \     /  block 1 \     /  block 2 \             /    block n   \         |
- *   ^     /   \   /            \   /            \           /                \        |
- *   |    /     \ /              \ /              \         /                  \       |
- *   |   |       |                |                |       |                    \     / \
- *   |---------------------------------------------         ------------------------------
- *   |   |8/1|8/1|hdr|        |ftr|hdr|        |ftr|  ...  |hdr|        |        |ftr|0/1|
- *   |---------------------------------------------         ------------------------------
- *   |       |       |        |       |        |               |        |        |       |
- *   |       |       |        |       |        |               |        |        |       |
+ * start    / \     /  block 1 \     /    block 2   \             /    block n   \         |
+ *   ^     /   \   /            \   /                \           /                \        |
+ *   |    /     \ /     free     \ /    allocated     \         /                  \       |
+ *   |   |       |                |                    |       |                    \     / \
+ *   |-------------------------------------------------        ------------------------------
+ *   |   |8/1|8/1|hdr|        |ftr|hdr|                |  ...  |hdr|        |        |ftr|0/1|
+ *   |-------------------------------------------------         ------------------------------
+ *   |       |       |        |       |        |       |       |        |        |       |
+ *   |       |       |        |       |        |       |       |        |        |       |
  *    \     /        |
  *     \   /         |
  *      \ /      heaplistp   
@@ -32,12 +35,12 @@
  * 
  * Block Format:
  * 
- *       31       ...       3 2 1 0
- *      ----------------------------
- *      |    Block Size      | a/f |   Header    a = 001 : Allocated
- *      |--------------------------|             f = 000 : Free
- *      |                          | <- bp
- *      |         Payload          |
+ *       31       ...       3 2 1 0                                Allocation Status
+ *      ----------------------------              --------------------------------------------------
+ *      |    Block Size      | a/f |   Header      Current Block           |  Previous Block
+ *      |--------------------------|              ---------------------------------------------------
+ *      |                          | <- bp         a = 0#1 : Allocated     |  a = 01# : Allocated
+ *      |         Payload          |               f = 0#0 : Free          |  f = 00# : Free
  *      |  (allocated block only)  |
  *      |                          |
  *      |                          |
@@ -45,11 +48,16 @@
  *      |         Padding          |
  *      |        (Optional)        |
  *      |--------------------------|
- *      |    Block Size      | a/f |   Footer  
+ *      |    Block Size      | a/f |   Footer: only present in free blocks  
  *      ----------------------------
  * 
  * Block Payload Pointer (bp): point to the first byte of the payload 
  * 
+ * 
+ * 
+ * ================================================================================================
+ * TODO:
+ *   - adapt implementation to optional footer
  */
 #include "mm.h"
 #include "memlib.h"           // mem_sbrk
