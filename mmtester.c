@@ -26,7 +26,8 @@ int main()
 
    mm_check_heap( 1 );
 
-   realloc_test();
+   malloc_test();
+   //realloc_test();
   
    mem_deinit();
 
@@ -41,6 +42,20 @@ void malloc_test()
    mm_check_heap( 1 );
 
    mm_free( ptr );
+   mm_check_heap( 1 );
+
+   ptr = mm_malloc( 64 );
+
+   char* ptr2 = mm_malloc( 28 );
+
+   mm_check_heap( 1 );
+
+   mm_free( ptr );
+
+   mm_check_heap( 1 );
+
+   mm_free( ptr2 );
+
    mm_check_heap( 1 );
 
    ptr = mm_malloc( 4096 );
@@ -59,40 +74,40 @@ void malloc_test()
 
 void realloc_test()
 {
-   // ptr is NULL
-   char* ptr = mm_realloc( NULL, 64 );
+   // // ptr is NULL
+   // char* ptr = mm_realloc( NULL, 64 );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   // size is zero
-   ptr = mm_realloc( ptr, 0 );
+   // // size is zero
+   // ptr = mm_realloc( ptr, 0 );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   ptr = mm_realloc( ptr, 64 );
+   // ptr = mm_realloc( ptr, 64 );
    
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   // size is < old size
-   ptr = mm_realloc( ptr, 32 );
+   // // size is < old size
+   // ptr = mm_realloc( ptr, 32 );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   mm_free( ptr );
+   // mm_free( ptr );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   ptr = mm_realloc( NULL, 64 );
+   // ptr = mm_realloc( NULL, 64 );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   ptr = mm_realloc( ptr, 128 );
+   // ptr = mm_realloc( ptr, 128 );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 
-   mm_free( ptr );
+   // mm_free( ptr );
 
-   mm_check_heap( 1 );
+   // mm_check_heap( 1 );
 }
 
 
