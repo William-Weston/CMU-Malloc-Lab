@@ -14,15 +14,15 @@
  *    - footer only needed in free blocks
  *    - add a previous allcated bit to the block format
  * 
- *        prologue                                                                  epilogue  
- * start    / \     /  block 1 \     /    block 2   \             /    block n   \         |
- *   ^     /   \   /            \   /                \           /                \        |
- *   |    /     \ /     free     \ /    allocated     \         /                  \       |
- *   |   |       |                |                    |       |                    \     / \
- *   |-------------------------------------------------        ------------------------------
+ *        prologue                                                                  epilogue      mem_sbrk
+ * start    / \     /  block 1 \     /    block 2   \             /    block n   \         |     /
+ *   ^     /   \   /            \   /                \           /                \        |    /
+ *   |    /     \ /     free     \ /    allocated     \         /                  \       |   /
+ *   |   |       |                |                    |       |                    \     / \ |
+ *   |-------------------------------------------------        -------------------------------
  *   |   |8/1|8/1|hdr|        |ftr|hdr|                |  ...  |hdr|        |        |ftr|0/1|
  *   |-------------------------------------------------         ------------------------------
- *   |       |       |        |       |        |       |       |        |        |       |
+ *   |       |       |        |       |        |       |       |        |        |       |    
  *   |       |       |        |       |        |       |       |        |        |       |
  *    \     /        |
  *     \   /         |
@@ -35,12 +35,12 @@
  * 
  * Block Format:
  * 
- *       31       ...       3 2 1 0                                Allocation Status
+ *       31       ...           1 0                                Allocation Status
  *      ----------------------------              --------------------------------------------------
- *      |    Block Size      | a/f |   Header      Current Block           |  Previous Block
+ *      |    Block Size       |    |   Header      Current Block           |  Previous Block
  *      |--------------------------|              ---------------------------------------------------
- *      |                          | <- bp         a = 0#1 : Allocated     |  a = 01# : Allocated
- *      |         Payload          |               f = 0#0 : Free          |  f = 00# : Free
+ *      |                          | <- bp         a = #1 : Allocated     |  a = 1# : Allocated
+ *      |         Payload          |               f = #0 : Free          |  f = 0# : Free
  *      |  (allocated block only)  |
  *      |                          |
  *      |                          |
@@ -48,7 +48,7 @@
  *      |         Padding          |
  *      |        (Optional)        |
  *      |--------------------------|
- *      |    Block Size      | a/f |   Footer: only present in free blocks  
+ *      |    Block Size       |    |   Footer: only present in free blocks  
  *      ----------------------------
  * 
  * Block Payload Pointer (bp): point to the first byte of the payload 
@@ -57,7 +57,7 @@
  * 
  * ================================================================================================
  * TODO:
- *   - adapt implementation to optional footer
+ *   - implement mm_realloc
  */
 #include "mm.h"
 #include "memlib.h"           // mem_sbrk
@@ -70,36 +70,42 @@
 // Constants
 // =====================================
 
-#define WSIZE          4          // Word and header/footer size (bytes)
-#define DSIZE          8          // Double word size (bytes)
-#define ALIGNMENT      8          // Align on 8 byte boundaries
-#define CHUNKSIZE      ( 1<<12 )  // Extend heap by this amount (bytes)
-#define MIN_BLOCK_SIZE 16         // The minimum block size, 8 byte payload and 8 byte header/footer
+#define WSIZE                 4          // Word and header/footer size (bytes)
+#define DSIZE                 8          // Double word size (bytes)
+#define ALIGNMENT             8          // Align on 8 byte boundaries
+#define CHUNKSIZE             ( 1<<12 )  // Extend heap by this amount (bytes)
+#define MIN_BLOCK_SIZE        8         // The minimum block size, 8 byte payload and 8 byte header/footer
 
 
 // =====================================
 // Macros
 //=====================================
 
-#define MAX( x, y )            ( ( x ) > ( y ) ? ( x ) : ( y ) )  
+#define MAX( x, y )                  ( ( x ) > ( y ) ? ( x ) : ( y ) )  
 
-#define GET( p )               ( *( uint32_t* )( p ) )         // read a word at address ptr
-#define PUT( p, val )          ( *( uint32_t* )( p ) = val )   // write a word at address ptr 
+#define GET( p )                     ( *( uint32_t* )( p ) )         // read a word at address ptr
+#define PUT( p, val )                ( *( uint32_t* )( p ) = val )   // write a word at address ptr 
 
-#define PACK( size, alloc )    ( ( size ) | ( alloc ) )        // pack a size, in bytes, and allocated bit into a word
-#define GET_SIZE( p )          ( GET( p ) & ( ~0x7 ) )         // get the size from a packed word
-#define GET_ALLOC( p )         ( GET( p ) & ( 0x1 ) )          // get the allocated bit from a packed word
+#define PACK( size, alloc, prev )    ( ( size ) | ( alloc ) | ( prev << 1 ) )   // pack a size, in bytes, and allocated bit into a word
+#define GET_SIZE( p )                ( GET( p ) & ( ~0x7 ) )                    // get the size from a packed word
+#define GET_ALLOC( p )               ( GET( p ) & ( 0x1 ) )                     // get the allocated bit from a packed word
+#define GET_PREV_ALLOC( p )          ( ( GET( p ) & ( 0x2 ) ) >> 1 )            // get the previous allocated bit from packed word
+#define SET_PREV_ALLOC( p )          ( PUT( ( p ), GET( ( p ) ) | 0x2 ) )
+#define CLEAR_PREV_ALLOC( p )        ( PUT( ( p ), GET( ( p ) ) & ~0x2 ) )
 
 // given a pointer to a block, compute the address of its header or footer
-#define HDRP( bp )             ( ( char* )( bp ) - WSIZE )     
-#define FTRP( bp )             ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) - DSIZE ) )
+#define HDRP( bp )                   ( ( char* )( bp ) - WSIZE )     
+#define FTRP( bp )                   ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) - DSIZE ) )
 
 // given a pointer to a block (bp), compute the address of the next or previous block pointer
-#define NEXT_BLKP( bp )        ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) ) ) 
-#define PREV_BLKP( bp )        ( ( char* )( bp ) - ( GET_SIZE( ( bp ) - DSIZE ) ) )
+#define NEXT_BLKP( bp )              ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) ) ) 
+#define PREV_BLKP( bp )              ( ( char* )( bp ) - ( GET_SIZE( ( bp ) - DSIZE ) ) )
 
 // round size up to the nearest alignment
-#define ALIGN( size )          ( ( ( size ) + ALIGNMENT - 1 ) & ~( ALIGNMENT - 1  ) )
+#define ALIGN( size )                ( ( ( size ) + ALIGNMENT - 1 ) & ~( ALIGNMENT - 1  ) )
+
+// given a requested allocation size, round up to payload size that satisfies alignment for allocated blocks
+#define ALIGN_PAYLOAD( size )        ( ( ( ( ( size ) + 11 ) >> 3 ) << 3 ) - 4 )
 
 
 // =====================================
@@ -117,6 +123,7 @@ static void* extend_heap( size_t words );
 static void* coalesce( void* bp );
 static void* find_block( size_t block_size );
 static void  place( void* bp, size_t size );
+static void  place_allocation( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
 static void  prologuecheck( void* bp );
@@ -141,9 +148,9 @@ int mm_init()
 
    // create prologe and epilogue
    PUT( heap_listp, 0 );                          // padding
-   PUT( heap_listp + WSIZE, PACK( 8, 1 ) );       // prologue header
-   PUT( heap_listp + 2 * WSIZE, PACK( 8, 1 ) );   // prologue footer
-   PUT( heap_listp + 3 * WSIZE, PACK( 0, 1 ) );   // epilogue header
+   PUT( heap_listp + WSIZE, PACK( 8, 1, 1 ) );       // prologue header
+   PUT( heap_listp + 2 * WSIZE, PACK( 8, 1, 1 ) );   // prologue footer
+   PUT( heap_listp + 3 * WSIZE, PACK( 0, 1, 1 ) );   // epilogue header
 
    heap_listp += 4 * WSIZE;
    
@@ -166,7 +173,7 @@ void* mm_malloc( size_t size )
    if ( size == 0 )
       return NULL;
    
-   size_t const block_size = ALIGN( size ) + DSIZE;
+   size_t const block_size = ALIGN_PAYLOAD( size ) + WSIZE;
 
    void* bp = find_block( block_size );
 
@@ -178,7 +185,7 @@ void* mm_malloc( size_t size )
          return NULL;
    }
    
-   place( bp, block_size );
+   place_allocation( bp, block_size );
    
    return bp;
 }
@@ -194,11 +201,18 @@ void  mm_free( void* ptr )
    if ( ptr == NULL )
       return;
 
-   char*  const bp   = ( char* )ptr;
-   size_t const size = GET_SIZE( HDRP( bp ) );
+   char*  const bp         = ( char* )ptr;
+   size_t const size       = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
-   PUT( HDRP( bp ), PACK( size, 0 ) ); 
-   PUT( FTRP( bp ), PACK( size, 0 ) );
+   PUT( HDRP( bp ), PACK( size, 0, prev_alloc ) ); 
+   PUT( FTRP( bp ), PACK( size, 0, prev_alloc ) );
+
+   void* const next_hdrp = HDRP( NEXT_BLKP( bp ) );
+   void* const next_ftrp = FTRP( NEXT_BLKP( bp ) );
+
+   CLEAR_PREV_ALLOC( next_hdrp );
+   CLEAR_PREV_ALLOC( next_ftrp );
 
    coalesce( bp );
 }
@@ -232,7 +246,7 @@ void  mm_free( void* ptr )
  * 
  * If there is not enough memory, the old memory block is not freed and null pointer is returned.
  *         
- */
+ *
 void* mm_realloc( void* ptr, size_t size )
 {
    if ( size == 0 )
@@ -244,7 +258,7 @@ void* mm_realloc( void* ptr, size_t size )
    if ( ptr == NULL )
       return mm_malloc( size );
 
-   size_t const block_size = ALIGN( size ) + DSIZE;
+   size_t const block_size = ALIGN_PAYLOAD( size ) + WSIZE;
    size_t const old_size   = GET_SIZE( HDRP( ptr ) );
 
    if ( block_size == old_size )   // nothing to do
@@ -252,7 +266,7 @@ void* mm_realloc( void* ptr, size_t size )
    
    if ( block_size < old_size )
    {
-      place( ptr, block_size );
+      place_allocation( ptr, block_size );
       return ptr;
    }
    
@@ -262,7 +276,7 @@ void* mm_realloc( void* ptr, size_t size )
    size_t const total_size = old_size + next_size;
 
    // is the next block free and of sufficient size?
-   if ( !GET_ALLOC( HDRP( next_block ) ) &&  block_size <= total_size )
+   if ( !GET_ALLOC( HDRP( next_block ) ) && block_size <= total_size )
    { 
       if ( total_size - block_size >= MIN_BLOCK_SIZE )  // we can split
       {
@@ -291,7 +305,7 @@ void* mm_realloc( void* ptr, size_t size )
    mm_free( ptr );
    return new_ptr;
 }
-
+*/
 
 /**
  * @brief Allocates memory for an array of num objects of size and initializes all bytes in the allocated storage to zero. 
@@ -345,18 +359,21 @@ static void* extend_heap( size_t words )
       return NULL;
    }
 
-   PUT( old_brk - WSIZE, PACK( size , 0 ) );          // free block header
-   PUT( old_brk + size - DSIZE, PACK( size, 0 ) );    // free block footer
-   PUT( old_brk + size - WSIZE, PACK( 0, 1 ) );       // new epilogue
+   int const prev_alloc = GET_PREV_ALLOC( old_brk - WSIZE );
 
-   return old_brk;
+   PUT( old_brk - WSIZE, PACK( size , 0, prev_alloc ) );          // free block header
+   PUT( old_brk + size - DSIZE, PACK( size, 0, prev_alloc ) );    // free block footer
+   PUT( old_brk + size - WSIZE, PACK( 0, 1, 0 ) );                // new epilogue
+
+   return coalesce( old_brk );
+   //return old_brk;
 }
 
 
 /**
  * @brief Boundary tag coalescing
  * 
- * @param bp      Block pointer
+ * @param bp      Block payload pointer to recently freed block
  * @return void*  Pointer to coalesced block
  * 
  * Cases:
@@ -368,7 +385,7 @@ static void* extend_heap( size_t words )
 static void* coalesce( void* bp )
 {
    size_t const bp_size = GET_SIZE( HDRP( bp ) );
-   int const prev_alloc = GET_ALLOC( bp - DSIZE );
+   int const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
    int const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
 
    if ( prev_alloc && next_alloc )                     // Case 1
@@ -379,8 +396,8 @@ static void* coalesce( void* bp )
       size_t const next_size = GET_SIZE( HDRP( bp + bp_size ) );
       size_t const new_size  = bp_size + next_size;
 
-      PUT( HDRP( bp ), PACK( new_size, 0 ) );          // create new header
-      PUT( FTRP( bp ), PACK( new_size, 0 ) );          // create new footer
+      PUT( HDRP( bp ), PACK( new_size, 0, 1 ) );          // create new header
+      PUT( FTRP( bp ), PACK( new_size, 0, 1 ) );          // create new footer
 
       return bp;
    }
@@ -391,8 +408,10 @@ static void* coalesce( void* bp )
       size_t const new_size  = bp_size + prev_size;
       char*  const prev_bp   = PREV_BLKP( bp );
 
-      PUT( HDRP( prev_bp ), PACK( new_size, 0 ) );    // create new header
-      PUT( FTRP( bp ), PACK( new_size, 0 ) );         // create new footer
+      // we know that the block before the previous must be allocated because
+      // it is one of our invariants
+      PUT( HDRP( prev_bp ), PACK( new_size, 0, 1) );    // create new header
+      PUT( FTRP( bp ), PACK( new_size, 0, 1 ) );        // create new footer
 
       return prev_bp;
    }
@@ -404,8 +423,10 @@ static void* coalesce( void* bp )
       size_t const new_size  = prev_size + bp_size + next_size;
       char*  const prev_bp   = PREV_BLKP( bp );
 
-      PUT( HDRP( prev_bp ), PACK( new_size, 0 ) );          // create header
-      PUT( FTRP( NEXT_BLKP( bp ) ), PACK( new_size, 0 ) );  // create footer
+      // we know that the block before the previous must be allocated because 
+      // it is one of our invariants
+      PUT( HDRP( prev_bp ), PACK( new_size, 0, 1 ) );          // create header
+      PUT( FTRP( NEXT_BLKP( bp ) ), PACK( new_size, 0, 1 ) );  // create footer
 
       return prev_bp;
    }
@@ -445,36 +466,74 @@ static void* find_block( size_t block_size )
 
 
 /**
- * @brief Place a block of size bytes at the start of the free block with the block pointer bp
- *        and split it if the excess would be at least equal to the minimum block size
+ * @brief Place a block of size bytes at the start of the free block with the block payload 
+ *        pointer bp and split it if the excess would be at least equal to the minimum block size
  * 
  * @param bp    block pointer to the free block
  * @param size  number of bytes to place in the free block
  */
 static void place( void* bp, size_t size )
 {
-   size_t const block_size = GET_SIZE( HDRP( bp ) );
+   // size_t const block_size = GET_SIZE( HDRP( bp ) );
 
-   if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
-   {
-      PUT( HDRP( bp ), PACK( size, 1 ) );
-      PUT( FTRP( bp ), PACK( size, 1 ) );
+   // if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
+   // {
+   //    PUT( HDRP( bp ), PACK( size, 1 ) );
+   //    PUT( FTRP( bp ), PACK( size, 1 ) );
       
-      char*  const next_bp   = NEXT_BLKP( bp );
-      size_t const next_size = block_size - size;
+   //    char*  const next_bp   = NEXT_BLKP( bp );
+   //    size_t const next_size = block_size - size;
 
-      PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
-      PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
+   //    PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
+   //    PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
 
-      coalesce( next_bp );
+   //    coalesce( next_bp );
+   // }
+   // else
+   // {
+   //    PUT( HDRP( bp ), PACK( block_size, 1 ) );
+   //    PUT( FTRP( bp ), PACK( block_size, 1 ) );
+   // }
+}
+
+
+/**
+ * @brief Place an allocated block of size bytes at the start of the free block
+ *        with the block payload pointer bp and split it if the excess would be
+ *        at least equal to the minimum free block size
+ * 
+ * @param bp 
+ * @param size 
+ */
+static void place_allocation( void* bp, size_t size )
+{
+   size_t const block_size = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+
+   if ( block_size - size >= MIN_BLOCK_SIZE )
+   {
+      if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
+      {
+         PUT( HDRP( bp ), PACK( size, 1, prev_alloc ) );
+
+         char*  const next_bp   = NEXT_BLKP( bp );
+         size_t const next_size = block_size - size;
+
+         PUT( HDRP( next_bp ), PACK( next_size, 0, 1 ) );
+         PUT( FTRP( next_bp ), PACK( next_size, 0, 1 ) );
+
+         coalesce( next_bp );
+      }
    }
    else
    {
-      PUT( HDRP( bp ), PACK( block_size, 1 ) );
-      PUT( FTRP( bp ), PACK( block_size, 1 ) );
+      PUT( HDRP( bp ), PACK( block_size, 1, prev_alloc ) );
+
+      // update next blocks prev_alloc bit
+      void*  const next_hdrp  = HDRP( NEXT_BLKP( bp ) );
+      SET_PREV_ALLOC( next_hdrp );
    }
 }
-
 
 /**
  * @brief Check heap for consistency
@@ -528,6 +587,7 @@ static void blockcheck( void* bp )
    }
 
    size_t const h_size = GET_SIZE( HDRP( bp ) );
+ 
 
    if ( h_size < MIN_BLOCK_SIZE )
    {
@@ -539,7 +599,9 @@ static void blockcheck( void* bp )
       printf( "Error: Block size (%zu) is not %d byte aligned\n", h_size, ALIGNMENT );
    }
 
-   if ( GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
+   int const is_allocated = GET_ALLOC( HDRP( bp ) );
+
+   if ( !is_allocated && GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
    {
       printf( "Error: header does not match footer\n" );
    }
@@ -559,12 +621,14 @@ static void prologuecheck( void* bp )
       return;
    }
 
-   size_t const h_size  = GET_SIZE( HDRP( bp ) );
-   size_t const f_size  = GET_SIZE( FTRP( bp ) );
-   size_t const h_alloc = GET_ALLOC( HDRP( bp ) );
-   size_t const f_alloc = GET_ALLOC( FTRP( bp ) );
+   size_t const h_size       = GET_SIZE( HDRP( bp ) );
+   size_t const f_size       = GET_SIZE( FTRP( bp ) );
+   size_t const h_alloc      = GET_ALLOC( HDRP( bp ) );
+   size_t const f_alloc      = GET_ALLOC( FTRP( bp ) );
+   size_t const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   size_t const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
 
-   if ( h_size != DSIZE || f_size != DSIZE || h_alloc != 0x1 || f_alloc != 0x1 )
+   if ( h_size != DSIZE || f_size != DSIZE || h_alloc != 0x1 || f_alloc != 0x1 || h_prev_alloc != 0x1 || f_prev_alloc != 0x1 )
    {
       printf( "Error: Bad Prologue\n");
       printblock( bp );
@@ -579,7 +643,8 @@ static void prologuecheck( void* bp )
  */
 static void printblock( void* bp )
 {
-   size_t const h_size  = GET_SIZE( HDRP( bp ) );
+   size_t const h_size       = GET_SIZE( HDRP( bp ) );
+   int    const is_allocated = GET_ALLOC( HDRP( bp ) );
 
    if ( h_size == 0 )
    {
@@ -587,12 +652,26 @@ static void printblock( void* bp )
       return;
    }
 
-   size_t const h_alloc = GET_ALLOC( HDRP( bp ) );
-   size_t const f_size  = GET_SIZE( FTRP( bp ) );
-   size_t const f_alloc = GET_ALLOC( FTRP( bp ) );
+   if ( is_allocated )
+   {
+      int    const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
-   printf( "%p: header: [%zu:%c] - footer: [%zu:%c]\n", bp, 
-            h_size, ( h_alloc ? 'a' : 'f' ),
-            f_size, ( f_alloc ? 'a' : 'f' ) );
+      printf( "%p: header: [%zu:%c%c]\n", bp, 
+               h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );
+
+   }
+   else
+   {
+      int    const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      size_t const f_size       = GET_SIZE( FTRP( bp ) );
+      int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
+      int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
+   
+      printf( "%p: header: [%zu:%c%c] - footer: [%zu:%c%c]\n", bp, 
+               h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
+               f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' ) );
+   }
 }
 
