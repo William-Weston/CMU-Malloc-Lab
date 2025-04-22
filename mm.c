@@ -48,16 +48,21 @@
  *      |         Padding          |
  *      |        (Optional)        |
  *      |--------------------------|
- *      |    Block Size       |    |   Footer: only present in free blocks  
+ *      |    Block Size       |    |   Footer: same as header (only present in free blocks)
  *      ----------------------------
+ * 
  * 
  * Block Payload Pointer (bp): point to the first byte of the payload 
  * 
  * 
+ * ==================
+ * Invariants
+ * ==================
  * 
- * ================================================================================================
- * TODO:
- *   - implement mm_realloc
+ *    - no adjacent free blocks
+ *       - all adjacent free blocks will be coalesced 
+ * 
+ *
  */
 #include "mm.h"
 #include "memlib.h"           // mem_sbrk
@@ -66,11 +71,13 @@
 #include <stdio.h>            // printf
 #include <string.h>           // memset
 
+
 // =====================================
 // Typedefs
 // =====================================
 
 typedef unsigned char byte;
+
 
 // =====================================
 // Constants
@@ -80,12 +87,12 @@ typedef unsigned char byte;
 #define DSIZE                 8          // Double word size (bytes)
 #define ALIGNMENT             8          // Align on 8 byte boundaries
 #define CHUNKSIZE             ( 1<<12 )  // Extend heap by this amount (bytes)
-#define MIN_BLOCK_SIZE        8         // The minimum block size, 8 byte payload and 8 byte header/footer
+#define MIN_BLOCK_SIZE        8          // The minimum block size, 8 byte payload and 8 byte header/footer
 
 
 // =====================================
 // Macros
-//=====================================
+// =====================================
 
 #define MAX( x, y )                  ( ( x ) > ( y ) ? ( x ) : ( y ) )  
 
@@ -251,7 +258,7 @@ void  mm_free( void* ptr )
  * 
  * If there is not enough memory, the old memory block is not freed and null pointer is returned.
  *         
- *
+ */
 void* mm_realloc( void* ptr, size_t size )
 {
    if ( size == 0 )
@@ -283,23 +290,23 @@ void* mm_realloc( void* ptr, size_t size )
    // is the next block free and of sufficient size?
    if ( !GET_ALLOC( HDRP( next_block ) ) && block_size <= total_size )
    { 
+      int const prev_alloc = GET_PREV_ALLOC( HDRP( ptr ) );
+
       if ( total_size - block_size >= MIN_BLOCK_SIZE )  // we can split
       {
-         PUT( HDRP( ptr ), PACK( block_size, 1 ) );
-         PUT( FTRP( ptr ), PACK( block_size, 1 ) );
+         PUT( HDRP( ptr ), PACK( block_size, 1, prev_alloc ) );
          
          byte*  const next_bp   = NEXT_BLKP( ptr );
          size_t const next_size = total_size - block_size;
 
-         PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
-         PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
+         PUT( HDRP( next_bp ), PACK( next_size, 0, 1 ) );
+         PUT( FTRP( next_bp ), PACK( next_size, 0, 1 ) );
 
          coalesce( next_bp );
       }
       else
       {
-         PUT( HDRP( ptr ), PACK( total_size, 1 ) );
-         PUT( FTRP( ptr ), PACK( total_size, 1 ) );
+         PUT( HDRP( ptr ), PACK( total_size, 1, prev_alloc ) );
       }
       return ptr;
    }
@@ -310,7 +317,7 @@ void* mm_realloc( void* ptr, size_t size )
    mm_free( ptr );
    return new_ptr;
 }
-*/
+
 
 /**
  * @brief Allocates memory for an array of num objects of size and initializes all bytes in the allocated storage to zero. 
