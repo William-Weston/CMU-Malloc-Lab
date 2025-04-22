@@ -67,6 +67,12 @@
 #include <string.h>           // memset
 
 // =====================================
+// Typedefs
+// =====================================
+
+typedef unsigned char byte;
+
+// =====================================
 // Constants
 // =====================================
 
@@ -83,8 +89,8 @@
 
 #define MAX( x, y )                  ( ( x ) > ( y ) ? ( x ) : ( y ) )  
 
-#define GET( p )                     ( *( uint32_t* )( p ) )         // read a word at address ptr
-#define PUT( p, val )                ( *( uint32_t* )( p ) = val )   // write a word at address ptr 
+#define GET( p )                     ( *( uint32_t* )( p ) )                    // read a word at address ptr
+#define PUT( p, val )                ( *( uint32_t* )( p ) = val )              // write a word at address ptr 
 
 #define PACK( size, alloc, prev )    ( ( size ) | ( alloc ) | ( prev << 1 ) )   // pack a size, in bytes, and allocated bit into a word
 #define GET_SIZE( p )                ( GET( p ) & ( ~0x7 ) )                    // get the size from a packed word
@@ -94,12 +100,12 @@
 #define CLEAR_PREV_ALLOC( p )        ( PUT( ( p ), GET( ( p ) ) & ~0x2 ) )
 
 // given a pointer to a block, compute the address of its header or footer
-#define HDRP( bp )                   ( ( char* )( bp ) - WSIZE )     
-#define FTRP( bp )                   ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) - DSIZE ) )
+#define HDRP( bp )                   ( ( byte* )( bp ) - WSIZE )     
+#define FTRP( bp )                   ( ( byte* )( bp ) + ( GET_SIZE( HDRP( bp ) ) - DSIZE ) )
 
 // given a pointer to a block (bp), compute the address of the next or previous block pointer
-#define NEXT_BLKP( bp )              ( ( char* )( bp ) + ( GET_SIZE( HDRP( bp ) ) ) ) 
-#define PREV_BLKP( bp )              ( ( char* )( bp ) - ( GET_SIZE( ( bp ) - DSIZE ) ) )
+#define NEXT_BLKP( bp )              ( ( byte* )( bp ) + ( GET_SIZE( HDRP( bp ) ) ) ) 
+#define PREV_BLKP( bp )              ( ( byte* )( bp ) - ( GET_SIZE( ( bp ) - DSIZE ) ) )
 
 // round size up to the nearest alignment
 #define ALIGN( size )                ( ( ( size ) + ALIGNMENT - 1 ) & ~( ALIGNMENT - 1  ) )
@@ -112,7 +118,7 @@
 // Private Global Variables
 // =====================================
 
-static char* heap_listp = NULL;            // pointer to first block past prologue in heap
+static byte* heap_listp = NULL;            // pointer to first block past prologue in heap
 
 
 // =====================================
@@ -122,7 +128,6 @@ static char* heap_listp = NULL;            // pointer to first block past prolog
 static void* extend_heap( size_t words );
 static void* coalesce( void* bp );
 static void* find_block( size_t block_size );
-static void  place( void* bp, size_t size );
 static void  place_allocation( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
@@ -201,7 +206,7 @@ void  mm_free( void* ptr )
    if ( ptr == NULL )
       return;
 
-   char*  const bp         = ( char* )ptr;
+   byte*  const bp         = ( byte* )ptr;
    size_t const size       = GET_SIZE( HDRP( bp ) );
    int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
@@ -271,7 +276,7 @@ void* mm_realloc( void* ptr, size_t size )
    }
    
    // block_size > old_size
-   char*  const next_block = NEXT_BLKP( ptr );
+   byte*  const next_block = NEXT_BLKP( ptr );
    size_t const next_size  = GET_SIZE( HDRP( next_block ) );
    size_t const total_size = old_size + next_size;
 
@@ -283,7 +288,7 @@ void* mm_realloc( void* ptr, size_t size )
          PUT( HDRP( ptr ), PACK( block_size, 1 ) );
          PUT( FTRP( ptr ), PACK( block_size, 1 ) );
          
-         char*  const next_bp   = NEXT_BLKP( ptr );
+         byte*  const next_bp   = NEXT_BLKP( ptr );
          size_t const next_size = total_size - block_size;
 
          PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
@@ -319,7 +324,7 @@ void* mm_calloc( size_t num, size_t size )
 {
    size_t const bytes = num * size;
 
-   char* ptr = mm_malloc( bytes );
+   byte* ptr = mm_malloc( bytes );
 
    if ( ptr == NULL )
       return NULL;
@@ -352,7 +357,7 @@ static void* extend_heap( size_t words )
 {
    size_t const size = ALIGN( words * WSIZE );   // aligned size in bytes
 
-   char* old_brk;
+   byte* old_brk;
    
    if ( ( intptr_t )( old_brk = mem_sbrk( size ) ) == -1 )
    {
@@ -406,7 +411,7 @@ static void* coalesce( void* bp )
    {
       size_t const prev_size = GET_SIZE( bp - DSIZE );
       size_t const new_size  = bp_size + prev_size;
-      char*  const prev_bp   = PREV_BLKP( bp );
+      byte*  const prev_bp   = PREV_BLKP( bp );
 
       // we know that the block before the previous must be allocated because
       // it is one of our invariants
@@ -421,7 +426,7 @@ static void* coalesce( void* bp )
       size_t const prev_size = GET_SIZE( bp - DSIZE );
       size_t const next_size = GET_SIZE( HDRP( bp + bp_size ) );
       size_t const new_size  = prev_size + bp_size + next_size;
-      char*  const prev_bp   = PREV_BLKP( bp );
+      byte*  const prev_bp   = PREV_BLKP( bp );
 
       // we know that the block before the previous must be allocated because 
       // it is one of our invariants
@@ -447,7 +452,7 @@ static void* coalesce( void* bp )
  */
 static void* find_block( size_t block_size )
 {
-   char* bp = heap_listp;
+   byte* bp = heap_listp;
 
    size_t size;
 
@@ -462,38 +467,6 @@ static void* find_block( size_t block_size )
    }
 
    return NULL;
-}
-
-
-/**
- * @brief Place a block of size bytes at the start of the free block with the block payload 
- *        pointer bp and split it if the excess would be at least equal to the minimum block size
- * 
- * @param bp    block pointer to the free block
- * @param size  number of bytes to place in the free block
- */
-static void place( void* bp, size_t size )
-{
-   // size_t const block_size = GET_SIZE( HDRP( bp ) );
-
-   // if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
-   // {
-   //    PUT( HDRP( bp ), PACK( size, 1 ) );
-   //    PUT( FTRP( bp ), PACK( size, 1 ) );
-      
-   //    char*  const next_bp   = NEXT_BLKP( bp );
-   //    size_t const next_size = block_size - size;
-
-   //    PUT( HDRP( next_bp ), PACK( next_size, 0 ) );
-   //    PUT( FTRP( next_bp ), PACK( next_size, 0 ) );
-
-   //    coalesce( next_bp );
-   // }
-   // else
-   // {
-   //    PUT( HDRP( bp ), PACK( block_size, 1 ) );
-   //    PUT( FTRP( bp ), PACK( block_size, 1 ) );
-   // }
 }
 
 
@@ -516,7 +489,7 @@ static void place_allocation( void* bp, size_t size )
       {
          PUT( HDRP( bp ), PACK( size, 1, prev_alloc ) );
 
-         char*  const next_bp   = NEXT_BLKP( bp );
+         byte*  const next_bp   = NEXT_BLKP( bp );
          size_t const next_size = block_size - size;
 
          PUT( HDRP( next_bp ), PACK( next_size, 0, 1 ) );
@@ -543,14 +516,14 @@ static void place_allocation( void* bp, size_t size )
 static void heapcheck( int verbose )
 {
    {  // check prologue
-      void* const prologuebp = (char*)heap_listp - DSIZE;
+      void* const prologuebp = (byte*)heap_listp - DSIZE;
       if ( verbose )
          printblock( prologuebp );
 
       prologuecheck( prologuebp );
    }
 
-   char* bp = NULL;
+   byte* bp = NULL;
 
    for ( bp = heap_listp; GET_SIZE( HDRP( bp ) ) > 0; bp = NEXT_BLKP( bp ) )
    {
