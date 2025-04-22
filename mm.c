@@ -13,31 +13,40 @@
  * Version 2: Optimization
  *    - footer only needed in free blocks
  *    - add a previous allcated bit to the block format
+ *    - change prologue to be a single word
  * 
- *        prologue                                                                  epilogue      mem_sbrk
- * start    / \     /  block 1 \     /    block 2   \             /    block n   \         |     /
- *   ^     /   \   /            \   /                \           /                \        |    /
- *   |    /     \ /     free     \ /    allocated     \         /                  \       |   /
- *   |   |       |                |                    |       |                    \     / \ |
+ * 
+ *    prologue
+ *       |   __________________       ______________               ______________      epilogue   mem_sbrk
+ * start /  /     block 1      \     /    block 2   \             /    block n   \         |     /
+ *   ^  /  /                    \   /                \           /                \        |    /
+ *   | /  /        free          \ /    allocated     \         /       free       \       |   /
+ *   |/ \|                        |                    |       |                    \     / \ |
  *   |-------------------------------------------------        -------------------------------
- *   |   |8/1|8/1|hdr|        |ftr|hdr|                |  ...  |hdr|        |        |ftr|0/1|
+ *   |   |hdr|                |ftr|hdr|                |  ...  |hdr|        |        |ftr|   |
  *   |-------------------------------------------------         ------------------------------
- *   |       |       |        |       |        |       |       |        |        |       |    
- *   |       |       |        |       |        |       |       |        |        |       |
- *    \     /        |
- *     \   /         |
- *      \ /      heaplistp   
- *     double                   
- *      word
- *     aligned
- *    (8 bytes)
+ *   |       |       |        |       |        |       |           |        |        |       |    
+ *   |       |       |        |       |        |       |           |        |        |       |
+ *           |                                                      \      /
+ *           |                                                       \    /
+ *        heaplistp                                                   \  /
+ *                                                                double word
+ *                                                                  aligned
+ *                                                                 (8 bytes)  
+ * 
+ * Prologue:                                  Epilogue:  
+ *                                                      
+ *       31       ...           1 0                 31       ...           1 0
+ *      ----------------------------                ----------------------------
+ *      |       size = 4       |1 1|                |       size = 0       |# 1|
+ *      ----------------------------                ----------------------------
  * 
  * 
  * Block Format:
  * 
  *       31       ...           1 0                                Allocation Status
  *      ----------------------------              --------------------------------------------------
- *      |    Block Size       |    |   Header      Current Block           |  Previous Block
+ *      |     Block Size      |    |   Header      Current Block           |  Previous Block
  *      |--------------------------|              ---------------------------------------------------
  *      |                          | <- bp         a = #1 : Allocated     |  a = 1# : Allocated
  *      |         Payload          |               f = #0 : Free          |  f = 0# : Free
@@ -48,7 +57,7 @@
  *      |         Padding          |
  *      |        (Optional)        |
  *      |--------------------------|
- *      |    Block Size       |    |   Footer: same as header (only present in free blocks)
+ *      |     Block Size      |    |   Footer: same as header (only present in free blocks)
  *      ----------------------------
  * 
  * 
@@ -110,7 +119,7 @@ typedef unsigned char byte;
 #define HDRP( bp )                   ( ( byte* )( bp ) - WSIZE )     
 #define FTRP( bp )                   ( ( byte* )( bp ) + ( GET_SIZE( HDRP( bp ) ) - DSIZE ) )
 
-// given a pointer to a block (bp), compute the address of the next or previous block pointer
+// given a pointer to a block payload (bp), compute the address of the next or previous block payload pointer
 #define NEXT_BLKP( bp )              ( ( byte* )( bp ) + ( GET_SIZE( HDRP( bp ) ) ) ) 
 #define PREV_BLKP( bp )              ( ( byte* )( bp ) - ( GET_SIZE( ( bp ) - DSIZE ) ) )
 
@@ -155,20 +164,17 @@ static void  printblock( void* bp );
 int mm_init()
 {
    // create initial heap
-   if ( ( heap_listp = mem_sbrk( 4 * WSIZE ) ) == ( void* )-1 )
+   if ( ( heap_listp = mem_sbrk( 2 * WSIZE ) ) == ( void* )-1 )
       return -1;
 
    // create prologe and epilogue
-   PUT( heap_listp, 0 );                          // padding
-   PUT( heap_listp + WSIZE, PACK( 8, 1, 1 ) );       // prologue header
-   PUT( heap_listp + 2 * WSIZE, PACK( 8, 1, 1 ) );   // prologue footer
-   PUT( heap_listp + 3 * WSIZE, PACK( 0, 1, 1 ) );   // epilogue header
+   PUT( heap_listp, PACK( 0, 1, 1 ) );                  // prologue
+   PUT( heap_listp + WSIZE, PACK( 0, 1, 1 ) );          // epilogue
 
-   heap_listp += 4 * WSIZE;
-   
    if ( extend_heap( CHUNKSIZE / WSIZE ) == NULL )
       return -1;
 
+   heap_listp += DSIZE;
    return 0;
 }
 
@@ -354,7 +360,7 @@ void mm_check_heap( int verbose )
 
 
 /**
- * @brief  Extend heap with free block and return its block pointer
+ * @brief  Extend heap with free block and return its block payload pointer
  * 
  * @param words    Number of words by which to extend the heap
  * @return void*   On success, pointer to new free block
@@ -378,7 +384,6 @@ static void* extend_heap( size_t words )
    PUT( old_brk + size - WSIZE, PACK( 0, 1, 0 ) );                // new epilogue
 
    return coalesce( old_brk );
-   //return old_brk;
 }
 
 
@@ -451,7 +456,7 @@ static void* coalesce( void* bp )
  * @brief Locate block on free list
  * 
  * @param block_size  number of bytes required 
- * @return void*      On success, block pointer to free block of at least block_size bytes
+ * @return void*      On success, block payload pointer to free block of at least block_size bytes
  *                    On error, null pointer indicates request can not be satisfied
  * 
  * Implements a naive first fit algorithm that starts at heaplistp and ends when either
@@ -522,8 +527,10 @@ static void place_allocation( void* bp, size_t size )
  */
 static void heapcheck( int verbose )
 {
+   printf( "%p: heap_listp\n", heap_listp );
+
    {  // check prologue
-      void* const prologuebp = (byte*)heap_listp - DSIZE;
+      void* const prologuebp = (byte*)heap_listp - WSIZE;
       if ( verbose )
          printblock( prologuebp );
 
@@ -554,7 +561,7 @@ static void heapcheck( int verbose )
 /**
  * @brief Check a given block for alignment and consistency between header and footer
  * 
- * @param bp Block pointer to block we will check
+ * @param bp Block payload pointer to block we will check
  * 
  * 
  */
@@ -591,35 +598,34 @@ static void blockcheck( void* bp )
 /**
  * @brief Check prologue block for appropriate format
  * 
- * @param bp Block pointer to prologue
+ * @param bp Block payload pointer to prologue
  */
 static void prologuecheck( void* bp )
 {
-   if ( ( (uintptr_t)bp % ALIGNMENT ) != 0 )
+   if ( ( (uintptr_t)bp % WSIZE ) != 0 )
    {
-      printf( "Error: Bad Prologue - %p is not %d byte aligned\n", bp, ALIGNMENT );
+      printf( "Error: Bad Prologue - %p is not %d byte aligned\n", bp, WSIZE );
       return;
    }
 
    size_t const h_size       = GET_SIZE( HDRP( bp ) );
-   size_t const f_size       = GET_SIZE( FTRP( bp ) );
    size_t const h_alloc      = GET_ALLOC( HDRP( bp ) );
-   size_t const f_alloc      = GET_ALLOC( FTRP( bp ) );
    size_t const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-   size_t const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
 
-   if ( h_size != DSIZE || f_size != DSIZE || h_alloc != 0x1 || f_alloc != 0x1 || h_prev_alloc != 0x1 || f_prev_alloc != 0x1 )
+
+   if ( h_size != 0 || h_alloc != 0x1 || h_prev_alloc != 0x1 )
    {
-      printf( "Error: Bad Prologue\n");
+      printf( "Error: Bad Prologue - %p: header: [%zu:%c%c]\n", bp, 
+               h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );
       printblock( bp );
    }
 }
 
 
 /**
- * @brief Print header and footer contents of a given block
+ * @brief Print header and footer (optional) contents of a given block
  * 
- * @param bp Block pointer for whose contents we will print
+ * @param bp Block payload pointer for whose contents we will print
  */
 static void printblock( void* bp )
 {
@@ -628,14 +634,26 @@ static void printblock( void* bp )
 
    if ( h_size == 0 )
    {
-      printf( "%p: EOL\n", bp );       // epilogue 
+      int const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+
+      if ( bp == heap_listp - WSIZE )  // prologue
+      {
+         printf( "%p: Prologue: [%zu:%c%c]\n", bp, 
+            h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );
+      }
+      else                            // epilogue 
+      {
+         printf( "%p: Epilogue: [%zu:%c%c]\n", bp, 
+            h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );     
+      }
       return;
    }
 
    if ( is_allocated )
    {
-      int    const h_alloc      = GET_ALLOC( HDRP( bp ) );
-      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      int const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
       printf( "%p: header: [%zu:%c%c]\n", bp, 
                h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );

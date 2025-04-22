@@ -17,16 +17,17 @@
 void malloc_test();
 void realloc_test();
 void calloc_test();
-void test();
+void init_test();
 
 int main()
 {
-   
+   puts( "\n---------------------- intit ----------------------\n" );
+   init_test();
 
    puts( "\n-------------------- mm_malloc --------------------\n" );
    malloc_test();
 
-   puts( "\n-------------------- mm_realloc --------------------\n" );
+   puts( "\n------------------- mm_realloc --------------------\n" );
    realloc_test();
 
    puts( "\n-------------------- mm_calloc --------------------\n" );
@@ -172,7 +173,11 @@ void calloc_test()
 }
 
 
-void test()
+void init_test()
 {
+   mem_init();
+   mm_init();
 
+   mm_check_heap( 1 );
+   mem_deinit();
 }
