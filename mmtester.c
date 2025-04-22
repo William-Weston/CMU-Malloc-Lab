@@ -21,15 +21,16 @@ void test();
 
 int main()
 {
-   mem_init();
-   mm_init();
+   
 
-   mm_check_heap( 1 );
-
+   puts( "\n-------------------- mm_malloc --------------------\n" );
    malloc_test();
-   //realloc_test();
-  
-   mem_deinit();
+
+   puts( "\n-------------------- mm_realloc --------------------\n" );
+   realloc_test();
+
+   puts( "\n-------------------- mm_calloc --------------------\n" );
+   calloc_test();
 
    return EXIT_SUCCESS;
 }
@@ -37,6 +38,11 @@ int main()
 
 void malloc_test()
 {
+   mem_init();
+   mm_init();
+
+   mm_check_heap( 1 );
+
    char* ptr = mm_malloc( 64 );
 
    mm_check_heap( 1 );
@@ -69,50 +75,64 @@ void malloc_test()
    mm_free( ptr );
 
    mm_check_heap( 1 );
+
+   mem_deinit();
 }
 
 
 void realloc_test()
 {
-   // // ptr is NULL
-   // char* ptr = mm_realloc( NULL, 64 );
+   mem_init();
+   mm_init();
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // // size is zero
-   // ptr = mm_realloc( ptr, 0 );
+   // ptr is NULL
+   char* ptr = mm_realloc( NULL, 64 );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // ptr = mm_realloc( ptr, 64 );
+   // size is zero
+   ptr = mm_realloc( ptr, 0 );
+
+   mm_check_heap( 1 );
+
+   ptr = mm_realloc( ptr, 64 );
    
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // // size is < old size
-   // ptr = mm_realloc( ptr, 32 );
+   // size is < old size
+   ptr = mm_realloc( ptr, 32 );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // mm_free( ptr );
+   mm_free( ptr );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // ptr = mm_realloc( NULL, 64 );
+   ptr = mm_realloc( NULL, 64 );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // ptr = mm_realloc( ptr, 128 );
+   ptr = mm_realloc( ptr, 128 );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
 
-   // mm_free( ptr );
+   mm_free( ptr );
 
-   // mm_check_heap( 1 );
+   mm_check_heap( 1 );
+
+   mem_deinit();
 }
 
 
 void calloc_test()
 {
+   mem_init();
+   mm_init();
+
+   mm_check_heap( 1 );
+
    char* ptr = mm_calloc( 32, 1 );
 
    for ( int idx = 0; idx < 32; ++idx )
@@ -126,6 +146,29 @@ void calloc_test()
    mm_check_heap( 1 );
    mm_free( ptr );
    mm_check_heap( 1 );
+
+   ptr = mm_calloc( 4086, 1 );
+   mm_check_heap( 1 );
+   
+   int* ip = mm_calloc( 1000, sizeof( int ) );
+
+   for ( int idx = 0; idx < 1000; ++idx )
+   {
+      if ( *ip != 0 )
+      {
+         printf( "Error: mm_calloc failed to zero initialize integers\n" );
+         break;
+      }
+   }
+
+   mm_check_heap( 1 );
+   mm_free( ptr );
+   mm_check_heap( 1 );
+
+   mm_free( ip );
+   mm_check_heap( 1 );
+
+   mem_deinit();
 }
 
 
