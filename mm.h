@@ -12,7 +12,7 @@
 #ifndef __2025_04_15_MM_H__
 #define __2025_04_15_MM_H__
 
-#include <stdlib.h>           // size_t
+#include <stddef.h>           // size_t
 
 int   mm_init( void );
 

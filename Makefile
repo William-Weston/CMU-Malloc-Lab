@@ -2,28 +2,42 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -std=gnu11 -O2 -fsanitize=undefined
 
-# Target executable
-TARGET = program
+# Target executables
+IMPLICIT = implicit-list
+EXPLICIT = explicit-list
+SEG = seg-list
 
-# Source files
-SRCS = $(wildcard *.c)
+# Source files for each executable
+IMPLICIT_SRCS = memlib.c std_wrappers.c mm.c mmtester.c
+EXPLICIT_SRCS = memlib.c std_wrappers.c explicit_list.c explicit_tests.c
+SEG_SRCS = memlib.c std_wrappers.c seg_list.c seg_tests.c
 
-# Object files
-OBJS = $(SRCS:.c=.o)
+# Object files for each executable
+IMPLICIT_OBJS = $(IMPLICIT_SRCS:.c=.o)
+EXPLICIT_OBJS = $(EXPLICIT_SRCS:.c=.o)
+SEG_OBJS = $(SEG_SRCS:.c=.o)
 
 # Default target
-all: $(TARGET)
+all: $(IMPLICIT) $(EXPLICIT) $(SEG)
 
-# Linking
-$(TARGET): $(OBJS)
+# Linking for implicit-list
+$(IMPLICIT): $(IMPLICIT_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-# Compilation
+# Linking for explicit-list
+$(EXPLICIT): $(EXPLICIT_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# Linking for seg-list
+$(SEG): $(SEG_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# Compilation rule for object files
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Clean up
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(IMPLICIT_OBJS) $(EXPLICIT_OBJS) $(SEG_OBJS) $(IMPLICIT) $(EXPLICIT) $(SEG)
 
 .PHONY: all clean
