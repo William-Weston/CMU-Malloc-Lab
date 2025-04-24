@@ -250,7 +250,16 @@ void* mm_realloc( void* ptr, size_t size )
  */
 void* mm_calloc( size_t num, size_t size )
 {
-   return NULL;
+   size_t const bytes = num * size;
+
+   byte* ptr = mm_malloc( bytes );
+
+   if ( ptr == NULL )
+      return NULL;
+      
+   memset( ptr, 0, bytes );
+
+   return ptr;
 }
 
 
@@ -440,7 +449,7 @@ static void printblock( void* bp )
       int    const h_alloc      = is_allocated;
       int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
 
-      printf( "%p: Prologue - header: [%zu:%c%c] - footer: [%zu:%c%c]\n", bp, 
+      printf( "%p: Prologue: header: [%zu:%c%c] | footer: [%zu:%c%c]\n", bp, 
          h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
          f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' ) 
       );
@@ -465,7 +474,7 @@ static void printblock( void* bp )
       byte*  const next_ptr     = ( byte* )GET_NEXT_PTR( bp );
       byte*  const prev_ptr     = ( byte* )GET_PREV_PTR( bp );
 
-      printf( "%p: header: [%zu:%c%c] - next*: %p - prev* %p - footer: [%zu:%c%c]\n", bp, 
+      printf( "%p: header: [%zu:%c%c] | next: %p | prev: %p | footer: [%zu:%c%c]\n", bp, 
                h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
                next_ptr, prev_ptr, 
                f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' )
