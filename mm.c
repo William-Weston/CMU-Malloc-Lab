@@ -520,6 +520,7 @@ static void place_allocation( void* bp, size_t size )
    }
 }
 
+
 /**
  * @brief Check heap for consistency
  * 
