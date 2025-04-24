@@ -8,11 +8,19 @@
  * @copyright Copyright (c) 2025
  * 
  */
+#include "memlib.h"
+#include "mm.h"
 
 #include <stdlib.h>    // EXIT_SUCCESS
 
 
 int main()
 {
+   mem_init();
+
+   mm_init();
+
+   mm_check_heap( 1 );
+   mem_deinit();
    return EXIT_SUCCESS;
 }
