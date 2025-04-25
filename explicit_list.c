@@ -144,6 +144,7 @@ static void* coalesce( void* bp );            // coalesce adjacent free blocks
 static void  free_list_insert( void* bp );    // insert into free list
 static void  free_list_remove( void* bp );
 static void* find_block( size_t block_size ); // find block on free list
+static void  place_allocation( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
 static void  prologuecheck( void* bp );
@@ -189,7 +190,23 @@ int mm_init( void )
  */
 void* mm_malloc( size_t size )
 {
-   return NULL;
+   if ( size == 0 )
+      return NULL;
+
+   size_t const block_size = BLOCK_SIZE( size );
+   printf( "size: %zu\n", block_size );
+   void* bp = find_block( block_size );
+
+   if ( bp == NULL )
+   {
+      size_t const extend = MAX( block_size, CHUNKSIZE );
+      if ( ( bp = extend_heap( extend ) ) == NULL )
+         return NULL;
+   }
+
+   place_allocation( bp, block_size );
+
+   return bp;
 }
 
 
@@ -477,7 +494,7 @@ static void* find_block( size_t block_size )
 
    while ( bp )
    {
-      if ( GET_ALLOC( HDRP( bp ) ) && GET_SIZE( HDRP( bp ) ) >= block_size )
+      if ( !GET_ALLOC( HDRP( bp ) ) && GET_SIZE( HDRP( bp ) ) >= block_size )
       {
          return bp;
       }
@@ -485,6 +502,48 @@ static void* find_block( size_t block_size )
    }
 
    return NULL;
+}
+
+
+/**
+ * @brief Place an allocated block of size bytes at the start of the free block
+ *        with the block payload pointer bp and split it if the excess would be
+ *        at least equal to the minimum free block size
+ * 
+ * @param bp   Block payload pointer 
+ * @param size Size of allocation
+ */
+static void place_allocation( void* bp, size_t size )
+{
+   size_t const block_size = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   byte*  const next_bp    = NEXT_BLKP( bp );
+
+   if ( block_size - size >= MIN_BLOCK_SIZE ) 
+   {
+      PUT( HDRP( bp ), PACK( size, prev_alloc, 1 ) );
+
+      byte*  const next_bp   = NEXT_BLKP( bp );
+      size_t const next_size = block_size - size;
+
+      PUT( HDRP( next_bp ), PACK( next_size, prev_alloc, 0 ) );
+      PUT( FTRP( next_bp ), PACK( next_size, prev_alloc, 0 ) );
+
+      free_list_insert( next_bp );
+      free_list_remove( bp );
+   }
+   else
+   {
+      PUT( HDRP( bp ), PACK( block_size, prev_alloc, 1 ) );
+
+      SET_PREV_ALLOC( HDRP( next_bp ) );
+      if ( GET_ALLOC( HDRP( next_bp ) ) )
+      {
+         SET_PREV_ALLOC( FTRP( next_bp ) );
+      }
+
+      free_list_remove( bp );
+   }
 }
 
 
