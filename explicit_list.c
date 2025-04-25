@@ -108,8 +108,8 @@ typedef unsigned char byte;
 
 #define PUT_NEXT_PTR( bp, ptr )      ( PUT_PTR( ( bp ), ( ptr ) ) )
 #define PUT_PREV_PTR( bp, ptr )      ( PUT_PTR( ( bp + DSIZE ), ( ptr ) ) )
-#define GET_NEXT_PTR( bp )           ( GET_PTR( bp ) )
-#define GET_PREV_PTR( bp )           ( GET_PTR( bp + DSIZE ) )
+#define GET_NEXT_PTR( bp )           ( ( byte* )GET_PTR( bp ) )
+#define GET_PREV_PTR( bp )           ( ( byte* )GET_PTR( bp + DSIZE ) )
 
 // given a pointer to a block, compute the address of its header or footer
 #define HDRP( bp )                   ( ( byte* )( bp ) - WSIZE )     
@@ -139,9 +139,11 @@ static byte* free_listp = NULL;
 // =====================================
 
 
-static void* extend_heap( size_t size );   // extend the heap by size bytes
-static void* coalesce( void* bp );         // coalesce adjacent free blocks
-static void  free_list_insert( void* bp ); // insert into free list
+static void* extend_heap( size_t size );      // extend the heap by size bytes
+static void* coalesce( void* bp );            // coalesce adjacent free blocks
+static void  free_list_insert( void* bp );    // insert into free list
+static void  free_list_remove( void* bp );
+static void* find_block( size_t block_size ); // find block on free list
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
 static void  prologuecheck( void* bp );
@@ -324,9 +326,73 @@ static void* extend_heap( size_t size )
  *         2. The previous block is allocated and the next block is free.
  *         3. The previous block is free and the next block is allocated.
  *         4. The previous and next blocks are both free.
+ * 
+ * TODO:  Handle removal from free list with function
  */
 static void* coalesce( void* bp )
 {
+   size_t const bp_size    = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   int    const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
+
+   if ( prev_alloc && next_alloc )                       // Case 1
+   {
+      return bp;
+   }
+
+   if ( prev_alloc && !next_alloc )                      // Case 2
+   {
+      byte*  const next_bp   = bp + bp_size;
+      size_t const next_size = GET_SIZE( HDRP( next_bp ) );
+      size_t const new_size  = bp_size + next_size;
+
+      PUT( HDRP( bp ), PACK( new_size, 1, 0 ) );          // create new header
+      PUT( FTRP( bp ), PACK( new_size, 1, 0 ) );          // create new footer
+
+      // adjust free list pointers
+      free_list_remove( next_bp );
+
+      return bp;
+   }
+
+   if ( !prev_alloc && next_alloc )                     // Case 3
+   {
+      size_t const prev_size = GET_SIZE( bp - DSIZE );
+      size_t const new_size  = bp_size + prev_size;
+      byte*  const prev_bp   = PREV_BLKP( bp );
+
+      // we know that the block before the previous must be allocated because
+      // it is one of our invariants
+      PUT( HDRP( prev_bp ), PACK( new_size, 1, 0 ) );   // create new header
+      PUT( FTRP( prev_bp ), PACK( new_size, 1, 0 ) );   // create new footer
+      
+      // adjust free list pointers
+      free_list_remove( bp );
+
+      return prev_bp;
+   }
+
+   if ( !prev_alloc && !next_alloc )                  // Case 4
+   {
+      byte*  const prev_bp   = PREV_BLKP( bp );
+      byte*  const next_bp   = NEXT_BLKP( bp );
+      size_t const prev_size = GET_SIZE( bp - DSIZE );
+      size_t const next_size = GET_SIZE( HDRP( next_bp ) );
+      size_t const new_size  = prev_size + bp_size + next_size;
+      
+
+      // we know that the block before the previous and after the next must 
+      // be allocated because it is one of our invariants
+      PUT( HDRP( prev_bp ), PACK( new_size, 1, 0 ) );  // create header
+      PUT( FTRP( prev_bp ), PACK( new_size, 1, 0 ) );  // create footer
+
+      // adjust free list pointers
+      free_list_remove( bp );
+      free_list_remove( next_bp );
+
+      return prev_bp;
+   }
+
    return bp;      // dummy line
 }
 
@@ -354,6 +420,50 @@ static void free_list_insert( void* bp )
       PUT_NEXT_PTR( new_bp, NULL );
       PUT_PREV_PTR( new_bp, NULL );
    }
+}
+
+
+/**
+ * @brief Remove a block payload pointer from the free list
+ * 
+ * @param bp  Block payload pointer on the free list to remove
+ */
+static void free_list_remove( void* bp )
+{
+   // adjust free list pointers
+   byte* const fl_prev_bp = GET_PREV_PTR( bp );
+   byte* const fl_next_bp = GET_NEXT_PTR( bp );
+
+   if ( fl_prev_bp )
+      PUT_NEXT_PTR( fl_prev_bp, GET_NEXT_PTR( bp ) );
+   if ( fl_next_bp )
+      PUT_PREV_PTR( fl_next_bp, GET_PREV_PTR( bp ) );
+}
+
+/**
+ * @brief Locate block on free list
+ * 
+ * @param block_size  number of bytes required 
+ * @return void*      On success, block payload pointer to free block of at least block_size bytes
+ *                    On error, null pointer indicates request can not be satisfied
+ * 
+ * Implements a naive first fit algorithm that searches the free list for
+ * a free block of sufficient size
+ */
+static void* find_block( size_t block_size )
+{
+   byte* bp = free_listp;
+
+   while ( bp )
+   {
+      if ( GET_ALLOC( HDRP( bp ) ) && GET_SIZE( HDRP( bp ) ) >= block_size )
+      {
+         return bp;
+      }
+      bp = GET_NEXT_PTR( bp );
+   }
+
+   return NULL;
 }
 
 
@@ -471,8 +581,8 @@ static void printblock( void* bp )
       int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
       int    const h_alloc      = is_allocated;
       int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
-      byte*  const next_ptr     = ( byte* )GET_NEXT_PTR( bp );
-      byte*  const prev_ptr     = ( byte* )GET_PREV_PTR( bp );
+      byte*  const next_ptr     = GET_NEXT_PTR( bp );
+      byte*  const prev_ptr     = GET_PREV_PTR( bp );
 
       printf( "%p: header: [%zu:%c%c] | next: %p | prev: %p | footer: [%zu:%c%c]\n", bp, 
                h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
