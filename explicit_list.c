@@ -201,7 +201,28 @@ void* mm_malloc( size_t size )
  */
 void mm_free( void* ptr )
 {
+   if ( ptr == NULL )
+      return;
 
+   // change our allocation status
+   byte*  const bp         = ( byte* )ptr;
+   size_t const size       = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+
+   PUT( HDRP( bp ), PACK( size, prev_alloc, 0 ) ); 
+   PUT( FTRP( bp ), PACK( size, prev_alloc, 0 ) );
+
+   // change the allocation bit in the next block's header and footer (if it exists)
+   byte* const next_bp = NEXT_BLKP( bp );
+   CLEAR_PREV_ALLOC( HDRP( next_bp ) );
+
+   if ( !GET_ALLOC( HDRP( next_bp ) ) )
+   {
+      CLEAR_PREV_ALLOC( FTRP( next_bp ) );
+   }
+
+   free_list_insert( bp );
+   coalesce( bp );
 }
 
 
