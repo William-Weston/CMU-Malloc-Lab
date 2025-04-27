@@ -123,7 +123,7 @@ typedef unsigned char byte;
 #define ALIGN( size )                ( ( ( size ) + ALIGNMENT - 1 ) & ~( ALIGNMENT - 1 ) ) 
 
 // Compute the block size required to satisfy an allocation request
-#define BLOCK_SIZE( size )           ( MAX( MIN_BLOCK_SIZE, ( ALIGN( size ) ) ) )      
+#define BLOCK_SIZE( size )           ( MAX( MIN_BLOCK_SIZE, ( ALIGN( size + WSIZE ) ) ) )      
 
 
 // =====================================
@@ -148,6 +148,7 @@ static void  place_allocation( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );
 static void  prologuecheck( void* bp );
+static void  free_list_check( int verbose );
 static void  printblock( void* bp );
 
 
@@ -163,6 +164,9 @@ static void  printblock( void* bp );
  */
 int mm_init( void )
 {
+   heap_listp = NULL;
+   free_listp = NULL;
+   
    // create initial heap
    if ( ( heap_listp = mem_sbrk( 4 * WSIZE ) ) == ( void* )-1 )
       return -1;
@@ -194,7 +198,7 @@ void* mm_malloc( size_t size )
       return NULL;
 
    size_t const block_size = BLOCK_SIZE( size );
-   printf( "size: %zu\n", block_size );
+
    void* bp = find_block( block_size );
 
    if ( bp == NULL )
@@ -331,24 +335,23 @@ void mm_check_heap( int verbose )
  */
 static void* extend_heap( size_t size )
 {
-   size_t const block_size = BLOCK_SIZE( size );
-
    byte* old_brk;
    
-   if ( ( intptr_t )( old_brk = mem_sbrk( block_size ) ) == -1 )
+   if ( ( intptr_t )( old_brk = mem_sbrk( size ) ) == -1 )
    {
       return NULL;
    }
 
    uint32_t const prev_alloc = GET_PREV_ALLOC( old_brk - WSIZE );
 
-   PUT( old_brk - WSIZE, PACK( block_size , prev_alloc, 0 ) );                // free block header
-   PUT( old_brk + block_size - DSIZE, PACK( block_size, prev_alloc, 0 ) );    // free block footer
-   PUT( old_brk + block_size - WSIZE, PACK( 0, 0, 1 ) );                      // new epilogue
+   PUT( old_brk - WSIZE, PACK( size , prev_alloc, 0 ) );          // free block header
+   PUT( old_brk + size - DSIZE, PACK( size, prev_alloc, 0 ) );    // free block footer
+   PUT( old_brk + size - WSIZE, PACK( 0, 0, 1 ) );                // new epilogue
 
    free_list_insert( old_brk );
 
-   return coalesce( old_brk );
+   return old_brk;
+   //return coalesce( old_brk );
 }
 
 
@@ -365,7 +368,6 @@ static void* extend_heap( size_t size )
  *         3. The previous block is free and the next block is allocated.
  *         4. The previous and next blocks are both free.
  * 
- * TODO:  Handle removal from free list with function
  */
 static void* coalesce( void* bp )
 {
@@ -375,11 +377,13 @@ static void* coalesce( void* bp )
 
    if ( prev_alloc && next_alloc )                       // Case 1
    {
+      printf( "coalesce: Case 1\n" );
       return bp;
    }
 
    if ( prev_alloc && !next_alloc )                      // Case 2
    {
+      printf( "coalesce: Case 2\n" );
       byte*  const next_bp   = bp + bp_size;
       size_t const next_size = GET_SIZE( HDRP( next_bp ) );
       size_t const new_size  = bp_size + next_size;
@@ -395,6 +399,7 @@ static void* coalesce( void* bp )
 
    if ( !prev_alloc && next_alloc )                     // Case 3
    {
+      printf( "coalesce: Case 3\n" );
       size_t const prev_size = GET_SIZE( bp - DSIZE );
       size_t const new_size  = bp_size + prev_size;
       byte*  const prev_bp   = PREV_BLKP( bp );
@@ -412,13 +417,13 @@ static void* coalesce( void* bp )
 
    if ( !prev_alloc && !next_alloc )                  // Case 4
    {
+      printf( "coalesce: Case 4\n" );
       byte*  const prev_bp   = PREV_BLKP( bp );
       byte*  const next_bp   = NEXT_BLKP( bp );
       size_t const prev_size = GET_SIZE( bp - DSIZE );
       size_t const next_size = GET_SIZE( HDRP( next_bp ) );
       size_t const new_size  = prev_size + bp_size + next_size;
       
-
       // we know that the block before the previous and after the next must 
       // be allocated because it is one of our invariants
       PUT( HDRP( prev_bp ), PACK( new_size, 1, 0 ) );  // create header
@@ -473,9 +478,11 @@ static void free_list_remove( void* bp )
    byte* const fl_next_bp = GET_NEXT_PTR( bp );
 
    if ( fl_prev_bp )
-      PUT_NEXT_PTR( fl_prev_bp, GET_NEXT_PTR( bp ) );
+      PUT_NEXT_PTR( fl_prev_bp, fl_next_bp );
+   else
+      free_listp = fl_next_bp;
    if ( fl_next_bp )
-      PUT_PREV_PTR( fl_next_bp, GET_PREV_PTR( bp ) );
+      PUT_PREV_PTR( fl_next_bp, fl_prev_bp );
 }
 
 /**
@@ -519,7 +526,7 @@ static void place_allocation( void* bp, size_t size )
    int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
    byte*  const next_bp    = NEXT_BLKP( bp );
 
-   if ( block_size - size >= MIN_BLOCK_SIZE ) 
+   if ( block_size - size >= MIN_BLOCK_SIZE )    // split block
    {
       PUT( HDRP( bp ), PACK( size, prev_alloc, 1 ) );
 
@@ -537,7 +544,7 @@ static void place_allocation( void* bp, size_t size )
       PUT( HDRP( bp ), PACK( block_size, prev_alloc, 1 ) );
 
       SET_PREV_ALLOC( HDRP( next_bp ) );
-      if ( GET_ALLOC( HDRP( next_bp ) ) )
+      if ( !GET_ALLOC( HDRP( next_bp ) ) )
       {
          SET_PREV_ALLOC( FTRP( next_bp ) );
       }
@@ -585,6 +592,13 @@ static void heapcheck( int verbose )
    {
       printf( "Error: Bad epilogue\n");
    }
+
+   if ( verbose )
+   {
+      puts( "Free list check:" );
+   }
+   
+   free_list_check( verbose );
 }
 
 
@@ -597,7 +611,41 @@ static void heapcheck( int verbose )
  */
 static void blockcheck( void* bp )
 {
+   // address of bp should be aligned
+   if( ( (uintptr_t)bp % ALIGNMENT ) != 0 )
+   {
+      printf( "Error: %p is not %d byte aligned\n", bp, ALIGNMENT );
+   }
 
+   size_t const h_size = GET_SIZE( HDRP( bp ) );
+ 
+
+   if ( h_size < MIN_BLOCK_SIZE )
+   {
+      printf( "Error: Block size (%zu) is less than the minimum block size (%d)", h_size, MIN_BLOCK_SIZE );
+   }
+
+   if ( h_size % ALIGNMENT != 0 )
+   {
+      printf( "Error: Block size (%zu) is not %d byte aligned\n", h_size, ALIGNMENT );
+   }
+
+   int const is_allocated = GET_ALLOC( HDRP( bp ) );
+
+   if ( !is_allocated && GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
+   {
+      printf( "Error: header does not match footer\n" );
+   }
+
+   if ( !GET_PREV_ALLOC( HDRP( bp ) ) )
+   {
+      byte* const prev_bp = PREV_BLKP( bp );
+
+      if ( GET_ALLOC( prev_bp ) )
+      {
+         printf( "Error: Previous block is allocated when current block's header indicates that it is free\n" );
+      }
+   }
 }
 
 
@@ -609,9 +657,44 @@ static void blockcheck( void* bp )
  */
 static void prologuecheck( void* bp )
 {
-
+   if ( GET( bp - WSIZE ) != GET( bp ) )
+   {
+      printf( "Error: Bad Prologue - Header & Footer are NOT consistent\n" );
+   }
 }
 
+
+/**
+ * @brief Consistency check of free_list
+ * 
+ * @param verbose Print verbose output
+ */
+static void free_list_check( int verbose )
+{
+   byte* bp   = free_listp;
+   byte* prev = NULL;
+
+   while ( bp )
+   {
+      byte* const next_bp = GET_NEXT_PTR( bp );
+      byte* const prev_bp = GET_PREV_PTR( bp );
+
+      if ( verbose )
+      {
+         printf( "%p: next: %p, prev: %p\n", bp, next_bp, prev_bp );
+      }
+
+      if ( prev != prev_bp )
+      {
+         printf( "Error: Bad free list pointers\n" );
+      }
+
+      prev = bp;
+      bp   = next_bp;
+   }
+   if ( verbose )
+      puts( "" );
+}
 
 
 /**
