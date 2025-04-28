@@ -213,6 +213,7 @@ void* mm_malloc( size_t size )
  * @brief      Free a block of allocated memory
  * 
  * @param ptr  Pointer to allocated block of memory to be freed
+ * TODO: fix bug induced by not checking if the next block has a footer
  */
 void  mm_free( void* ptr )
 {
@@ -401,9 +402,9 @@ static void* extend_heap( size_t words )
  */
 static void* coalesce( void* bp )
 {
-   size_t const bp_size = GET_SIZE( HDRP( bp ) );
-   int const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-   int const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
+   size_t const bp_size    = GET_SIZE( HDRP( bp ) );
+   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   int    const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
 
    if ( prev_alloc && next_alloc )                     // Case 1
       return bp;
@@ -495,20 +496,18 @@ static void place_allocation( void* bp, size_t size )
    size_t const block_size = GET_SIZE( HDRP( bp ) );
    int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
-   if ( block_size - size >= MIN_BLOCK_SIZE )
+  
+   if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
    {
-      if ( block_size - size >= MIN_BLOCK_SIZE )   // split block
-      {
-         PUT( HDRP( bp ), PACK( size, 1, prev_alloc ) );
+      PUT( HDRP( bp ), PACK( size, 1, prev_alloc ) );
 
-         byte*  const next_bp   = NEXT_BLKP( bp );
-         size_t const next_size = block_size - size;
+      byte*  const next_bp   = NEXT_BLKP( bp );
+      size_t const next_size = block_size - size;
 
-         PUT( HDRP( next_bp ), PACK( next_size, 0, 1 ) );
-         PUT( FTRP( next_bp ), PACK( next_size, 0, 1 ) );
+      PUT( HDRP( next_bp ), PACK( next_size, 0, 1 ) );
+      PUT( FTRP( next_bp ), PACK( next_size, 0, 1 ) );
 
-         coalesce( next_bp );
-      }
+      coalesce( next_bp );
    }
    else
    {
