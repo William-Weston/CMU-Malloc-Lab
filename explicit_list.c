@@ -166,7 +166,7 @@ int mm_init( void )
 {
    heap_listp = NULL;
    free_listp = NULL;
-   
+
    // create initial heap
    if ( ( heap_listp = mem_sbrk( 4 * WSIZE ) ) == ( void* )-1 )
       return -1;
@@ -279,7 +279,58 @@ void mm_free( void* ptr )
  */
 void* mm_realloc( void* ptr, size_t size )
 {
-   return NULL;
+   if ( size == 0 )
+   {
+      mm_free( ptr );
+      return ptr;
+   }
+
+   if ( ptr == NULL )
+      return mm_malloc( size );
+
+   size_t const block_size = BLOCK_SIZE( size );
+   size_t const old_size   = GET_SIZE( HDRP( ptr ) );
+
+   if ( block_size == old_size )
+      return ptr;
+   
+   if ( block_size < old_size )
+   {
+      place_allocation( ptr, block_size );
+      return ptr;
+   }
+
+   // block_size > old_size
+   byte*  const next_bp    = NEXT_BLKP( ptr );
+   size_t const next_size  = GET_SIZE( HDRP( next_bp ) );
+   size_t const total_size = old_size + next_size;
+
+   if ( !GET_ALLOC( HDRP( next_bp ) ) && block_size <= total_size )
+   {
+      int const prev_alloc = GET_PREV_ALLOC( HDRP( ptr ) );
+      
+      PUT( HDRP( ptr ), PACK( block_size, prev_alloc, 1 ) );
+
+      if ( total_size - block_size >= MIN_BLOCK_SIZE )  // we can split the following block
+      {
+         byte*  const split_bp  = NEXT_BLKP( ptr );
+         size_t const next_size = total_size - block_size;
+
+         PUT( HDRP( split_bp ), PACK( next_size, 1, 0 ) );
+         PUT( FTRP( split_bp ), PACK( next_size, 1, 0 ) );
+
+         free_list_insert( split_bp );
+      }
+
+      free_list_remove( next_bp );
+      return ptr;
+   }
+
+   // must allocate and copy
+   void* new_ptr = mm_malloc( size );
+   memcpy( new_ptr, ptr, old_size - DSIZE );
+   mm_free( ptr );
+   return new_ptr;
 }
 
 
@@ -350,8 +401,7 @@ static void* extend_heap( size_t size )
 
    free_list_insert( old_brk );
 
-   return old_brk;
-   //return coalesce( old_brk );
+   return coalesce( old_brk );
 }
 
 
