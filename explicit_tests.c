@@ -17,6 +17,8 @@
 void init_test();
 void malloc_test();
 void malloc_test2();
+void realloc_test();
+void realloc_test2();
 
 int main()
 {
@@ -28,6 +30,9 @@ int main()
 
    puts( "\n------------------------ malloc2 --------------------\n" );
    malloc_test2();
+
+   puts( "\n------------------------ realloc --------------------\n" );
+   realloc_test();
 
    return EXIT_SUCCESS;
 }
@@ -154,4 +159,26 @@ void malloc_test2()
    
 
    mem_deinit();
+}
+
+void realloc_test()
+{
+   mem_init();
+   mm_init();
+
+   char* cp = mm_malloc( 64 );
+
+   cp = mm_realloc( cp, 128 );
+   mm_check_heap( 1 );
+
+   mm_free( cp );
+
+   mm_check_heap( 1 );
+   mem_deinit();
+}
+
+
+void realloc_test2()
+{
+   
 }
