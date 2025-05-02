@@ -30,7 +30,6 @@ struct seg_list_header;
 typedef struct seg_list_header seg_list_header_t;
 
 
-
 // =====================================
 // Types
 // =====================================
@@ -39,7 +38,7 @@ struct seg_list_header
 {
    seg_list_header_t* next;
    uint64_t           vector[4];
-   int                size;
+   int32_t            size;
    byte               padding_[4];
 };
 
@@ -58,8 +57,8 @@ struct seg_list_header
 #define SEG48_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48 )
 #define SEG64_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64 )
 #define SEG128_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128 )
-#define SEG256_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 256 )
-#define SEG512_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 512 )
+#define SEG269_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 269 )
+#define SEG578_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 578 )
 
 // =====================================
 // Macros
@@ -84,9 +83,9 @@ static byte* free_list_32  = NULL;               // sizes 17 to 32
 static byte* free_list_48  = NULL;               // sizes 33 to 48
 static byte* free_list_64  = NULL;               // sizes 49 to 64
 static byte* free_list_128 = NULL;               // sizes 65 to 128
-static byte* free_list_256 = NULL;               // sizes 129 to 256
-static byte* free_list_512 = NULL;               // sizes 257 to 512
-static byte* free_list_big = NULL;               // sizes > 512      - implemented as explicit free list
+static byte* free_list_269 = NULL;               // sizes 129 to 269
+static byte* free_list_578 = NULL;               // sizes 257 to 578
+static byte* free_list_big = NULL;               // sizes > 578      - implemented as explicit free list
 
 
 // =====================================
@@ -96,7 +95,6 @@ static byte* free_list_big = NULL;               // sizes > 512      - implement
 void* create_new_seglist( byte** free_list, int size );
 void  init_seglist_header( void* ptr, int size );
 void  insert_new_seglist( byte** free_list, void* entry );
-
 int   find_free_offset( bitvector* bv, int num_entries );
 
 void* do_malloc_16();
@@ -104,8 +102,8 @@ void* do_malloc_32();
 void* do_malloc_48();
 void* do_malloc_64();
 void* do_malloc_128();
-void* do_malloc_256();
-void* do_malloc_512();
+void* do_malloc_269();
+void* do_malloc_578();
 void* do_malloc_big( size_t size );
 
 int do_free_16( void* ptr );
@@ -113,8 +111,8 @@ int do_free_32( void* ptr );
 int do_free_48( void* ptr );
 int do_free_64( void* ptr );
 int do_free_128( void* ptr );
-int do_free_256( void* ptr );
-int do_free_512( void* ptr );
+int do_free_269( void* ptr );
+int do_free_578( void* ptr );
 int do_free_big( void* ptr );
 
 void  print_seglist_headers( void* ptr );
@@ -140,7 +138,7 @@ int mm_init( void )
    free_list_48  = NULL;
    free_list_64  = NULL;
    free_list_128 = NULL;
-   free_list_512 = NULL;
+   free_list_578 = NULL;
    free_list_big = NULL;
 
    return 0;
@@ -179,15 +177,15 @@ void* mm_malloc( size_t size )
    {
       return do_malloc_128();
    }
-   else if( size <= 256 )
+   else if( size <= 269 )
    {
-      return do_malloc_256();
+      return do_malloc_269();
    }
-   else if( size <= 512 )
+   else if( size <= 578 )
    {
-      return do_malloc_512();
+      return do_malloc_578();
    }
-   else   // size > 512
+   else   // size > 578
    {
       return do_malloc_big( size );
    }
@@ -220,10 +218,10 @@ void mm_free( void* ptr )
    if ( do_free_128( ptr ) )
       return;
 
-   if ( do_free_256( ptr ) )
+   if ( do_free_269( ptr ) )
       return;
 
-   if ( do_free_512( ptr ) )
+   if ( do_free_578( ptr ) )
       return;
 
    do_free_big( ptr );
@@ -287,14 +285,16 @@ void* mm_calloc( size_t num, size_t size )
  */
 void mm_check_heap( int verbose )
 {
-   print_seglist_headers( free_list_16 );
-   print_seglist_headers( free_list_32 );
-   print_seglist_headers( free_list_48 );
-   print_seglist_headers( free_list_64 );
-   print_seglist_headers( free_list_128 );
-   print_seglist_headers( free_list_256 );
-   print_seglist_headers( free_list_512 );
-  
+   if ( verbose )
+   {
+      print_seglist_headers( free_list_16 );
+      print_seglist_headers( free_list_32 );
+      print_seglist_headers( free_list_48 );
+      print_seglist_headers( free_list_64 );
+      print_seglist_headers( free_list_128 );
+      print_seglist_headers( free_list_269 );
+      print_seglist_headers( free_list_578 );
+  }
 }
 
 
@@ -586,75 +586,75 @@ void* do_malloc_128()
 }
 
 
-void* do_malloc_256()
+void* do_malloc_269()
 {
-   if ( free_list_256 == NULL )
+   if ( free_list_269 == NULL )
    {
-      if ( create_new_seglist( &free_list_256, 256 ) == NULL )
+      if ( create_new_seglist( &free_list_269, 269 ) == NULL )
       {
          return NULL;   // can't allocate
       }
    }
 
-   byte* block256 = free_list_256;
+   byte* block269 = free_list_269;
 
    while ( 1 )
    {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block256;
-      int                const offset  = find_free_offset( &pheader->vector, SEG256_ENTRIES );  
+      seg_list_header_t* const pheader = ( seg_list_header_t* )block269;
+      int                const offset  = find_free_offset( &pheader->vector, SEG269_ENTRIES );  
 
       if ( offset == -1 )
       {
          if ( pheader->next )
          {
-            block256 = ( byte* )pheader->next;
+            block269 = ( byte* )pheader->next;
          }
          else
          {
-            if ( ( block256 = create_new_seglist( &free_list_256, 256 ) ) == NULL  )
+            if ( ( block269 = create_new_seglist( &free_list_269, 269 ) ) == NULL  )
                return NULL;
          }
       }
       else
       {
-         return block256 + offset * 256 + sizeof( seg_list_header_t );
+         return block269 + offset * 269 + sizeof( seg_list_header_t );
       }
    }
 }
 
 
-void* do_malloc_512()
+void* do_malloc_578()
 {
-   if ( free_list_512 == NULL )
+   if ( free_list_578 == NULL )
    {
-      if ( create_new_seglist( &free_list_512, 512 ) == NULL )
+      if ( create_new_seglist( &free_list_578, 578 ) == NULL )
       {
          return NULL;   // can't allocate
       }
    }
 
-   byte* block512 = free_list_512;
+   byte* block578 = free_list_578;
 
    while ( 1 )
    {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block512;
-      int                const offset  = find_free_offset( &pheader->vector, SEG512_ENTRIES );  
+      seg_list_header_t* const pheader = ( seg_list_header_t* )block578;
+      int                const offset  = find_free_offset( &pheader->vector, SEG578_ENTRIES );  
 
       if ( offset == -1 )
       {
          if ( pheader->next )
          {
-            block512 = ( byte* )pheader->next;
+            block578 = ( byte* )pheader->next;
          }
          else
          {
-            if ( ( block512 = create_new_seglist( &free_list_512, 512 ) ) == NULL  )
+            if ( ( block578 = create_new_seglist( &free_list_578, 578 ) ) == NULL  )
                return NULL;
          }
       }
       else
       {
-         return block512 + offset * 512 + sizeof( seg_list_header_t );
+         return block578 + offset * 578 + sizeof( seg_list_header_t );
       }
    }
 }
@@ -789,9 +789,9 @@ int do_free_128( void* ptr )
 }
 
 
-int do_free_256( void* ptr )
+int do_free_269( void* ptr )
 {
-   byte* searcher  = free_list_256;
+   byte* searcher  = free_list_269;
    byte* const tmp = ptr;
 
    while ( searcher )
@@ -800,7 +800,7 @@ int do_free_256( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 256;
+         int   const offset = ( tmp - searcher )/ 269;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -813,9 +813,9 @@ int do_free_256( void* ptr )
 }
 
 
-int do_free_512( void* ptr )
+int do_free_578( void* ptr )
 {
-   byte* searcher  = free_list_512;
+   byte* searcher  = free_list_578;
    byte* const tmp = ptr;
 
    while ( searcher )
@@ -824,7 +824,7 @@ int do_free_512( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 512;
+         int   const offset = ( tmp - searcher )/ 578;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
