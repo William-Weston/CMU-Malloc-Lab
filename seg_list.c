@@ -276,7 +276,15 @@ void* mm_realloc( void* ptr, size_t size )
  */
 void* mm_calloc( size_t num, size_t size )
 {
-   return NULL;
+   size_t const bytes = num * size;
+
+   void* ptr = mm_malloc( bytes );
+
+   if ( ptr == NULL )
+      return NULL;
+
+   memset( ptr, 0 , bytes );
+   return ptr;
 }
 
 
