@@ -25,7 +25,7 @@
 // =====================================
 
 typedef unsigned char byte;
-typedef uint64_t bitvector[4];
+typedef uint64_t      bitvector[4];
 
 struct seg_list_header;
 typedef struct seg_list_header seg_list_header_t;
@@ -40,7 +40,7 @@ struct seg_list_header
    seg_list_header_t* next;
    uint64_t           vector[4];
    uint32_t           size;
-   byte               padding_[4];
+   uint32_t           min;
 };
 
 
@@ -48,18 +48,18 @@ struct seg_list_header
 // Constants
 // =====================================
 
-#define WSIZE                        4             // Word size (bytes)
-#define DSIZE                        8             // Double word size (bytes)
-#define CHUNKSIZE                    ( 1 << 12 )   // Extend heap by this amount (bytes)
-#define ALIGNMENT                    16            // Align on 16 byte boundaries
+#define WSIZE                        4              // Word size (bytes)
+#define DSIZE                        8              // Double word size (bytes)
+#define CHUNKSIZE                    ( 1u << 12 )   // Extend heap by this amount (bytes)
+#define ALIGNMENT                    16             // Align on 16 byte boundaries
 
-#define SEG16_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 16 )
-#define SEG32_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 32 )
-#define SEG48_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48 )
-#define SEG64_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64 )
-#define SEG128_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128 )
-#define SEG269_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 269 )
-#define SEG578_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 578 )
+#define SEG16_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 16u  )
+#define SEG32_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 32u  )
+#define SEG48_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48u  )
+#define SEG64_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64u  )
+#define SEG128_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128u )
+#define SEG269_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 269u )
+#define SEG578_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 578u )
 
 // =====================================
 // Macros
@@ -98,6 +98,8 @@ void  init_seglist_header( void* ptr, int size );
 void  insert_new_seglist( byte** free_list, void* entry );
 int   find_free_offset( bitvector* bv, int num_entries );
 
+seg_list_header_t* get_seg_list( void* ptr );
+
 void* do_malloc_16();
 void* do_malloc_32();
 void* do_malloc_48();
@@ -116,8 +118,9 @@ int do_free_269( void* ptr );
 int do_free_578( void* ptr );
 int do_free_big( void* ptr );
 
-inline 
-int   seg_list_capacity( int size );
+inline int      seg_list_capacity( uint32_t size );
+inline uint32_t seg_list_min_size( uint32_t size );
+
 void  print_seglist_headers( void* ptr );
 
 
@@ -134,7 +137,7 @@ void  print_seglist_headers( void* ptr );
  */
 int mm_init( void )
 {
-   assert( sizeof( seg_list_header_t) == 48 );
+   assert( sizeof( seg_list_header_t) == 48u );
 
    free_list_16  = NULL;
    free_list_32  = NULL;
@@ -262,6 +265,12 @@ void mm_free( void* ptr )
  */
 void* mm_realloc( void* ptr, size_t size )
 {
+   // we must allocate and copy except under the following conditions
+   // - the previous allocation was not on a seg list and the following block is free and 
+   //   of sufficient size
+   // - the previous allocation was on a seg list and the requested size is within the same
+   //   seg list
+   //   - ie:  the previous allocation was for 64 bytes and the requested realloc was for 90 bytes
    return NULL;
 }
 
@@ -353,6 +362,7 @@ void init_seglist_header( void* ptr, int size )
    tmp.vector[2] = 0;
    tmp.vector[3] = 0;
    tmp.size      = size;
+   tmp.min       = seg_list_min_size( size );
 
    memcpy( ptr, &tmp, sizeof( tmp ) );
 }
@@ -406,6 +416,39 @@ int find_free_offset( bitvector* bv, int num_entries )
    }
    return -1;
 }
+
+
+/**
+ * @brief Get the seg list that contains a given pointer
+ * 
+ * @param ptr                  Pointer to memory allocated by mm_malloc, mm_realloc or mm_calloc
+ * @return seg_list_header_t*  On success, pointer to seg list
+ *                             On failure, NULL
+ */
+seg_list_header_t* get_seg_list( void* ptr )
+{
+   byte* const tmp          = ptr;
+   byte* const seg_lists[7] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128, free_list_269, free_list_578 };
+ 
+   for ( int idx = 0; idx < sizeof( seg_lists ); ++idx )
+   {
+      byte* searcher = seg_lists[idx];
+      
+      while ( searcher )
+      {
+         seg_list_header_t* pheader = ( seg_list_header_t* )searcher;
+
+         if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
+         {
+            return pheader;
+         }
+         searcher = ( byte* )pheader->next;
+      }
+   }
+
+   return NULL;
+}
+
 
 /**
  * @brief Handle allocations of size 16 bytes and less
@@ -854,9 +897,52 @@ int do_free_big( void* ptr )
 }
 
 
-inline int seg_list_capacity( int size )
+/**
+ * @brief The number of allocations stored in a given sized seg list 
+ * 
+ * @param size   The maximum size stored on the seg list
+ * @return int   The maximum number allocations the seg list can hold
+ */
+inline int seg_list_capacity( uint32_t size )
 {
    return ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / size;
+}
+
+
+/**
+ * @brief The minimum allocation size stored in a given size seg list
+ * 
+ * @param size       The maximum size held in the seg list
+ * @return uint32_t  The minimum size held in the seg list
+ */
+inline uint32_t seg_list_min_size( uint32_t size )
+{
+   switch ( size )
+   {
+   case 16:
+      return 1u;
+   
+   case 32:
+      return 17u;
+
+   case 48:
+      return 33u;
+
+   case 64:
+      return 49u;
+
+   case 128:
+      return 65u;
+   
+   case 269:
+      return 129u;
+
+   case 578:
+      return 270u;
+      
+   default:
+      return 579u;
+   }
 }
 
 
@@ -874,8 +960,8 @@ void print_seglist_headers( void* ptr )
 
    while ( pheader )
    {
-      printf( "(%p)  |  Size: %-5" PRIu32 "  |  Next: %-18p  |  Capacity: %-d\n", 
-               ptr, pheader->size, pheader->next, seg_list_capacity( pheader->size ) );
+      printf( "(%p)  |  Size: %3" PRIu32 " - %-3" PRIu32"  |  Next: %-18p  |  Capacity: %-d\n", 
+               ptr, pheader->min, pheader->size, pheader->next, seg_list_capacity( pheader->size ) );
       printf( "Status: [0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 "]\n", 
                pheader->vector[3], pheader->vector[2], pheader->vector[1], pheader->vector[0] );
       pheader = pheader->next;
