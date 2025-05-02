@@ -96,7 +96,7 @@ typedef unsigned char byte;
 #define GET( p )                     ( *( uint32_t* )( p ) )                          // read a word at address p
 #define PUT( p, val )                ( *( uint32_t* )( p ) = val )                    // write a word at address p
 
-#define PACK( size, prev, alloc )    ( ( size ) | ( prev << 1 ) | ( alloc ) )              // pack a size (in bytes), the previous block's allocation status and the current block's allocation status into a word
+#define PACK( size, prev, alloc )    ( ( size ) | ( prev << 1 ) | ( alloc ) )         // pack a size (in bytes), the previous block's allocation status and the current block's allocation status into a word
 
 #define GET_SIZE( p )                ( GET( p ) & ( ~0x7 ) )                          // get the size from a packed word
 #define GET_ALLOC( p )               ( GET( p ) & ( 0x1 ) )                           // get the allocated bit from a packed word
@@ -140,11 +140,11 @@ static byte* free_listp = NULL;
 // =====================================
 
 
-static void* extend_heap( size_t size );      // extend the heap by size bytes
-static void* coalesce( void* bp );            // coalesce adjacent free blocks
-static void  free_list_insert( void* bp );    // insert into free list
+static void* extend_heap( size_t size );                  // extend the heap by size bytes
+static void* coalesce( void* bp );                        // coalesce adjacent free blocks
+static void  free_list_insert( void* bp );                // insert into free list
 static void  free_list_remove( void* bp );
-static void* find_block( size_t block_size ); // find block on free list
+static void* find_block( size_t block_size );             // find block on free list
 static void  place_allocation( void* bp, size_t size );
 static void  heapcheck( int verbose );
 static void  blockcheck( void* bp );

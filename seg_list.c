@@ -13,6 +13,7 @@
 #include "memlib.h"                   // mem_sbrk
 
 #include <assert.h>
+#include <inttypes.h>                 // fixed width format macros for printf
 #include <stdint.h>                   // uint32_t, uintptr_t
 #include <stdio.h>                    // printf
 #include <string.h>                   // memset
@@ -38,7 +39,7 @@ struct seg_list_header
 {
    seg_list_header_t* next;
    uint64_t           vector[4];
-   int32_t            size;
+   uint32_t           size;
    byte               padding_[4];
 };
 
@@ -115,6 +116,8 @@ int do_free_269( void* ptr );
 int do_free_578( void* ptr );
 int do_free_big( void* ptr );
 
+inline 
+int   seg_list_capacity( int size );
 void  print_seglist_headers( void* ptr );
 
 
@@ -702,7 +705,7 @@ int do_free_32( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 32;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 32;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -727,7 +730,7 @@ int do_free_48( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 48;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 48;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -751,7 +754,7 @@ int do_free_64( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 64;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 64;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -775,7 +778,7 @@ int do_free_128( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 128;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 128;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -800,7 +803,7 @@ int do_free_269( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 269;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 269;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -824,7 +827,7 @@ int do_free_578( void* ptr )
 
       if ( tmp > searcher && tmp < searcher + CHUNKSIZE )
       {
-         int   const offset = ( tmp - searcher )/ 578;
+         int   const offset = ( tmp - ( searcher + sizeof( seg_list_header_t ) ) ) / 578;
          int   const word64 = offset / 64;
          int   const bit    = offset % 64;
          
@@ -843,6 +846,11 @@ int do_free_big( void* ptr )
 }
 
 
+inline int seg_list_capacity( int size )
+{
+   return ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / size;
+}
+
 
 /**
  * @brief Print header information for a given seg list
@@ -858,10 +866,10 @@ void print_seglist_headers( void* ptr )
 
    while ( pheader )
    {
-      printf( "(%p) Size: %d, Next: %p\n", ptr, pheader->size, pheader->next );   
-      printf( "Status: [0x%016lx:0x%016lx:0x%016lx:0x%016lx]\n", 
-               pheader->vector[3], pheader->vector[2], pheader->vector[1], pheader->vector[0] 
-            );
+      printf( "(%p)  |  Size: %-5" PRIu32 "  |  Next: %-18p  |  Capacity: %-d\n", 
+               ptr, pheader->size, pheader->next, seg_list_capacity( pheader->size ) );
+      printf( "Status: [0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 "]\n", 
+               pheader->vector[3], pheader->vector[2], pheader->vector[1], pheader->vector[0] );
       pheader = pheader->next;
    }
 }

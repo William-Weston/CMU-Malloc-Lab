@@ -11,7 +11,7 @@
 #include "memlib.h"    // memory system
 #include "mm.h"        // allocator
 
-#include <stddef.h>     // EXIT_SUCCESS
+#include <stdlib.h>     // EXIT_SUCCESS
 #include <stdio.h>      // printf
 
 void malloc_test();
