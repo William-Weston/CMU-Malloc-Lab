@@ -20,6 +20,7 @@ void malloc_test2();
 void malloc_test3();
 void malloc_test4();
 void malloc_test5();
+void malloc_test6();   // big malloc
 
 int main()
 {
@@ -38,8 +39,11 @@ int main()
    // puts( "\n----------------------- malloc4 --------------------\n" );
    // malloc_test4();
 
-   puts( "\n----------------------- malloc5 --------------------\n" );
-   malloc_test5();
+   // puts( "\n----------------------- malloc5 --------------------\n" );
+   // malloc_test5();
+
+   puts( "\n----------------------- malloc6 --------------------\n" );
+   malloc_test6();
 
    return EXIT_SUCCESS;
 }
@@ -250,6 +254,7 @@ void malloc_test5()
 
    char* ptrs[578];
    char* ptrs2[578];
+   char* ptrs3[578];
 
    for ( int count = 0; count < 578; ++count )
    {
@@ -259,6 +264,11 @@ void malloc_test5()
    for ( int count = 0; count < 578; ++count )
    {
       ptrs2[count] = mm_malloc( 32 );
+   }
+
+   for ( int count = 1; count < 578; ++count )
+   {
+      ptrs3[count] = mm_malloc( count );
    }
 
    mm_check_heap( 1 );
@@ -274,7 +284,27 @@ void malloc_test5()
    {
       mm_free( ptrs2[count] );
    }
+
+   for ( int count = 1; count < 578; ++count )
+   {
+      mm_free( ptrs3[count] );
+   }
+
+
    mm_check_heap( 1 );
+
+   mem_deinit();
+}
+
+
+void malloc_test6()
+{
+   mem_init();
+   mm_init();
+
+   char* cp = mm_malloc( 600 );
+
+   printf( "address: %p\n", cp );
 
    mem_deinit();
 }
