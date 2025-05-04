@@ -156,7 +156,7 @@ void  print_seglist_headers( void* ptr );
 // Functions for explicit free list
 // ----------------------------------
 
-static void  add_explicit_chunk();
+static void  add_explicit_chunk( size_t size );
 static void* coalesce( void* bp );                        // coalesce adjacent free blocks
 static void  free_list_insert( void* bp );                // insert into free list
 static void  free_list_remove( void* bp );
@@ -789,7 +789,7 @@ void* do_malloc_big( size_t size )
 
    if ( bp == NULL )
    {
-      add_explicit_chunk();
+      add_explicit_chunk( size );
       bp = find_block( block_size );
       if ( bp == NULL )               // must be out of memory
          return NULL;
@@ -961,19 +961,21 @@ void print_seglist_headers( void* ptr )
 /**
  * @brief Add a new chunk of memory to the explicit list
  * 
+ * @param size Size of requested allocation
  */
-static void add_explicit_chunk()
+static void add_explicit_chunk( size_t size )
 {
-   static uint32_t const free_size = CHUNKSIZE - ALIGNMENT;
+   size_t const chunk_size = MAX( CHUNKSIZE, size );
+   size_t const free_size  = chunk_size - ALIGNMENT;
 
    void* chunk;
 
-   if ( (intptr_t )( chunk = mem_sbrk( CHUNKSIZE ) ) == -1 )
+   if ( (intptr_t )( chunk = mem_sbrk( chunk_size ) ) == -1 )
    {
       return;
    }
 
-   void* free_bp = chunk + ALIGNMENT;
+   void* const free_bp = chunk + ALIGNMENT;
    
    PUT( chunk, 0 );                                      // padding
    PUT( chunk + WSIZE, PACK( DSIZE, 1, 1) );             // prologue: header
