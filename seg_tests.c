@@ -302,9 +302,28 @@ void malloc_test6()
    mem_init();
    mm_init();
 
-   char* cp = mm_malloc( 600 );
+   char* cp = mm_malloc( 3000 );
 
    printf( "address: %p\n", cp );
 
+   mm_check_heap( 1 );
+
+   char* cp2 = mm_malloc( 3000 );
+
+   printf( "address2: %p\n", cp2 );
+
+   mm_check_heap( 1 );
+
+   char* cp3 = mm_malloc( 6000 );
+
+   printf( "address2: %p\n", cp3 );
+
+   mm_check_heap( 1 );
+
+   char* cp4 = mm_malloc( 1100 );
+
+   printf( "address2: %p\n", cp4 );
+
+   mm_check_heap( 1 );
    mem_deinit();
 }
