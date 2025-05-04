@@ -30,7 +30,6 @@ typedef uint64_t      bitvector[4];
 struct seg_list_header;
 typedef struct seg_list_header seg_list_header_t;
 
-
 // =====================================
 // Types
 // =====================================
@@ -42,6 +41,7 @@ struct seg_list_header
    uint32_t           size;
    uint32_t           min;
 };
+
 
 
 // =====================================
@@ -124,6 +124,8 @@ static byte* free_list_269 = NULL;               // sizes 129 to 269
 static byte* free_list_578 = NULL;               // sizes 257 to 578
 static byte* free_list_big = NULL;               // sizes > 578      - implemented as explicit free list
 
+static byte* explicit_chunk = NULL;              // pointer to chunks of memory used for explicit free list
+
 
 // =====================================
 // Private Function Prototypes
@@ -162,8 +164,12 @@ static void  free_list_insert( void* bp );                // insert into free li
 static void  free_list_remove( void* bp );
 static void* find_block( size_t block_size );             // find block on free list
 static void  place_allocation( void* bp, size_t size );
-
-
+static void  heapcheck( int verbose );
+static void  check_chunk( byte* chunk, int verbose );
+static void  check_prologue( byte* bp, int verbose );
+static void  free_list_check( int verbose );
+static void  blockcheck( void* bp );
+static void  printblock( void* bp );
 
 // =====================================
 // Public Function Definitions
@@ -378,6 +384,8 @@ void mm_check_heap( int verbose )
       print_seglist_headers( free_list_269 );
       print_seglist_headers( free_list_578 );
   }
+
+  heapcheck( verbose );
 }
 
 
@@ -789,7 +797,7 @@ void* do_malloc_big( size_t size )
 
    if ( bp == NULL )
    {
-      add_explicit_chunk( size );
+      add_explicit_chunk( block_size );
       bp = find_block( block_size );
       if ( bp == NULL )               // must be out of memory
          return NULL;
@@ -965,24 +973,31 @@ void print_seglist_headers( void* ptr )
  */
 static void add_explicit_chunk( size_t size )
 {
-   size_t const chunk_size = MAX( CHUNKSIZE, size );
-   size_t const free_size  = chunk_size - ALIGNMENT;
+   static size_t const overhead = 2 * ALIGNMENT;
+
+   size_t const chunk_size = MAX( CHUNKSIZE, size + overhead );
+   size_t const free_size  = chunk_size - overhead;
 
    void* chunk;
-
    if ( (intptr_t )( chunk = mem_sbrk( chunk_size ) ) == -1 )
    {
       return;
    }
 
-   void* const free_bp = chunk + ALIGNMENT;
-   
-   PUT( chunk, 0 );                                      // padding
-   PUT( chunk + WSIZE, PACK( DSIZE, 1, 1) );             // prologue: header
-   PUT( chunk + DSIZE, PACK( DSIZE, 1, 1 ) );            // prologue: footer
+   void* const free_bp    = chunk + 2 * ALIGNMENT;
+   void* const next_chunk = explicit_chunk;
+
+   explicit_chunk = chunk;
+
+   PUT_PTR( chunk, next_chunk );                         // pointer to start of next chunk of explicit free list memory; used to validate heap
+   PUT( chunk + DSIZE, chunk_size );                     // chunk size
+   PUT( chunk + 12, 0 );                                 // padding
+   PUT( chunk + 16, 0 );                                 // padding
+   PUT( chunk + 20, PACK( 8, 1, 1 ) );                   // prologue header
+   PUT( chunk + 24, PACK( 8, 1, 1 ) );                   // prologue footer
    PUT( HDRP( free_bp ), PACK( free_size, 1, 0 ) );      // free block header
    PUT( FTRP( free_bp ), PACK( free_size, 1, 0 ) );      // free block footer
-   PUT( chunk + CHUNKSIZE - WSIZE, PACK( 0, 1, 1 ) );    // epilogue
+   PUT( chunk + chunk_size - WSIZE, PACK( 0, 1, 1 ) );   // epilogue
    
    free_list_insert( free_bp );
 }
@@ -1185,5 +1200,227 @@ static void place_allocation( void* bp, size_t size )
       }
 
       free_list_remove( bp );
+   }
+}
+
+
+/**
+ * @brief Check explicit heap and explicit free list for consistency
+ * 
+ * @param verbose Print extra information
+ */
+static void heapcheck( int verbose )
+{
+   if ( explicit_chunk == NULL )
+      return;
+
+   byte* chunk = explicit_chunk;
+
+   while( chunk )
+   {
+      check_chunk( chunk, verbose );
+      chunk = ( byte* )GET_PTR( chunk );
+   }
+
+   free_list_check( verbose );
+}
+
+/**
+ * @brief Check the chunk for consistency
+ * 
+ * @param chunk 
+ * @param verbose 
+ */
+static void check_chunk( byte* chunk, int verbose )
+{
+   size_t const size = GET( chunk + DSIZE );
+   size_t total_size = 0u;
+
+   if ( verbose )
+      printf( "Chunk: %p, Size: %zu\n", chunk, size );
+   
+   byte* bp = chunk + 24;
+
+   // check prologue
+   check_prologue( bp, verbose );
+   total_size += 28;
+   
+   size_t block_size;
+   for ( bp = chunk + 32; ( block_size = GET_SIZE( HDRP( bp ) ) ) > 0; bp = NEXT_BLKP( bp ) )
+   {
+      total_size += block_size;
+      if ( verbose )
+         printblock( bp );
+
+      blockcheck( bp );
+   }
+
+   // epilogue
+   if ( verbose )
+      printblock( bp );
+
+   if ( GET_SIZE( HDRP( bp ) ) != 0 && GET_ALLOC( HDRP( bp ) ) != 0x1 )
+   {
+      printf( "Error: Bad epilogue\n");
+   }
+
+   total_size += WSIZE;
+
+   if ( total_size != size )
+   {
+      printf( "Error: Declared chunk size of %zu not equal to actual size of %zu\n", size, total_size );
+   }
+}
+
+
+/**
+ * @brief Check Explicit lists prologues for consistency
+ * 
+ * @param bp     Pointer to prologue block payload pointer
+ * @param verbose 
+ */
+static void check_prologue( byte* bp, int verbose )
+{
+   if ( GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
+      puts( "Error: Bad prologue" );
+     
+   if ( verbose )
+   {
+      size_t const h_size       = GET_SIZE( HDRP( bp ) );
+      size_t const f_size       = GET_SIZE( FTRP( bp ) );
+      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
+      int    const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
+
+      printf( "%p: Prologue: header: [%zu:%c%c] | footer: [%zu:%c%c]\n", bp, 
+         h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
+         f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' ) 
+      );
+   }
+}
+
+/**
+ * @brief Consistency check of free_list
+ * 
+ * @param verbose Print verbose output
+ */
+static void free_list_check( int verbose )
+{
+   byte* bp   = free_list_big;
+   byte* prev = NULL;
+
+   while ( bp )
+   {
+      byte* const next_bp = GET_NEXT_PTR( bp );
+      byte* const prev_bp = GET_PREV_PTR( bp );
+
+      if ( verbose )
+      {
+         printf( "%p: next: %p, prev: %p\n", bp, next_bp, prev_bp );
+      }
+
+      if ( prev != prev_bp )
+      {
+         printf( "Error: Bad free list pointers\n" );
+      }
+
+      prev = bp;
+      bp   = next_bp;
+   }
+   if ( verbose )
+      puts( "" );
+}
+
+
+
+/**
+ * @brief Check a given block for alignment and consistency between header and footer
+ * 
+ * @param bp Block payload pointer to block we will check
+ * 
+ * 
+ */
+static void blockcheck( void* bp )
+{
+   // address of bp should be aligned
+   if( ( (uintptr_t)bp % ALIGNMENT ) != 0 )
+   {
+      printf( "Error: %p is not %d byte aligned\n", bp, ALIGNMENT );
+   }
+
+   size_t const h_size = GET_SIZE( HDRP( bp ) );
+ 
+
+   if ( h_size < MIN_BIG_BLOCK )
+   {
+      printf( "Error: Block size (%zu) is less than the minimum block size (%d)", h_size, MIN_BIG_BLOCK );
+   }
+
+   if ( h_size % ALIGNMENT != 0 )
+   {
+      printf( "Error: Block size (%zu) is not %d byte aligned\n", h_size, ALIGNMENT );
+   }
+
+   int const is_allocated = GET_ALLOC( HDRP( bp ) );
+
+   if ( !is_allocated && GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
+   {
+      printf( "Error: header does not match footer\n" );
+   }
+
+   if ( !GET_PREV_ALLOC( HDRP( bp ) ) )
+   {
+      byte* const prev_bp = PREV_BLKP( bp );
+
+      if ( GET_ALLOC( prev_bp ) )
+      {
+         printf( "Error: Previous block is allocated when current block's header indicates that it is free\n" );
+      }
+   }
+}
+
+
+
+/**
+ * @brief Print header and footer (optional) contents of a given block
+ * 
+ * @param bp Block payload pointer for whose contents we will print
+ */
+static void printblock( void* bp )
+{
+   size_t const h_size       = GET_SIZE( HDRP( bp ) );
+   int    const is_allocated = GET_ALLOC( HDRP( bp ) );
+
+   if ( h_size == 0 )     // epilogue
+   {
+      printf( "%p: Epilogue: [%zu:%c%c]\n", bp, 
+         h_size, ( GET_PREV_ALLOC( HDRP( bp ) ) ? 'a' : 'f' ), ( is_allocated ? 'a' : 'f' ) );
+      return;
+   }
+
+   if ( is_allocated )
+   {
+      int const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      int const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+
+      printf( "%p: header: [%zu:%c%c]\n", bp, 
+               h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );
+   }
+   else   // free block
+   {
+      size_t const f_size       = GET_SIZE( FTRP( bp ) );
+      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
+      int    const h_alloc      = is_allocated;
+      int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
+      byte*  const next_ptr     = GET_NEXT_PTR( bp );
+      byte*  const prev_ptr     = GET_PREV_PTR( bp );
+
+      printf( "%p: header: [%zu:%c%c] | next: %p | prev: %p | footer: [%zu:%c%c]\n", bp, 
+               h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
+               next_ptr, prev_ptr, 
+               f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' )
+            );
    }
 }
