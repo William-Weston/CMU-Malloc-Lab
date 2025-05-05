@@ -24,23 +24,23 @@ void malloc_test6();   // big malloc
 
 int main()
 {
-   // puts( "\n------------------------ malloc0 --------------------\n" );
-   // malloc_test();
+   puts( "\n------------------------ malloc0 --------------------\n" );
+   malloc_test();
 
-   // puts( "\n----------------------- malloc1 --------------------\n" );
-   // malloc_test1();
+   puts( "\n----------------------- malloc1 --------------------\n" );
+   malloc_test1();
 
-   // puts( "\n----------------------- malloc2 --------------------\n" );
-   // malloc_test2();
+   puts( "\n----------------------- malloc2 --------------------\n" );
+   malloc_test2();
 
-   // puts( "\n----------------------- malloc3 --------------------\n" );
-   // malloc_test3();
+   puts( "\n----------------------- malloc3 --------------------\n" );
+   malloc_test3();
 
-   // puts( "\n----------------------- malloc4 --------------------\n" );
-   // malloc_test4();
+   puts( "\n----------------------- malloc4 --------------------\n" );
+   malloc_test4();
 
-   // puts( "\n----------------------- malloc5 --------------------\n" );
-   // malloc_test5();
+   puts( "\n----------------------- malloc5 --------------------\n" );
+   malloc_test5();
 
    puts( "\n----------------------- malloc6 --------------------\n" );
    malloc_test6();
@@ -316,14 +316,23 @@ void malloc_test6()
 
    char* cp3 = mm_malloc( 6000 );
 
-   printf( "address2: %p\n", cp3 );
+   printf( "address3: %p\n", cp3 );
 
    mm_check_heap( 1 );
 
    char* cp4 = mm_malloc( 1100 );
 
-   printf( "address2: %p\n", cp4 );
+   printf( "address4: %p\n", cp4 );
 
    mm_check_heap( 1 );
+
+   puts( "\nFree" );
+   mm_free( cp  );
+   mm_free( cp2 );
+   mm_free( cp3 );
+   mm_free( cp4 );
+
+   mm_check_heap( 1 );
+
    mem_deinit();
 }

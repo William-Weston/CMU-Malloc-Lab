@@ -50,7 +50,7 @@ struct seg_list_header
 
 #define WSIZE                        4              // Word size (bytes)
 #define DSIZE                        8              // Double word size (bytes)
-#define CHUNKSIZE                    ( 1u << 12 )   // Extend heap by this amount (bytes)
+#define CHUNKSIZE                    ( 1u << 12u )  // Extend heap by this amount (bytes)
 #define ALIGNMENT                    16             // Align on 16 byte boundaries
 #define MIN_BIG_BLOCK                592            // Minimum block size of allocation on explicit free list
 
@@ -108,7 +108,8 @@ struct seg_list_header
 
 // Compute the block size required to satisfy an allocation request
 #define BLOCK_SIZE( size )           ( MAX( MIN_BIG_BLOCK, ( ALIGN( size + WSIZE ) ) ) )      
-
+// Compute chunk size rounded up to the nearest 4K 
+#define CHUNK_SIZE( size )           ( ( ( ( uint64_t )( size ) >> 12 ) + 1 ) << 12 ) 
 
 
 // =====================================
@@ -134,7 +135,7 @@ static byte* explicit_chunk = NULL;              // pointer to chunks of memory 
 void* create_new_seglist( byte** free_list, int size );
 void  init_seglist_header( void* ptr, int size );
 void  insert_new_seglist( byte** free_list, void* entry );
-int   find_free_offset( bitvector* bv, int num_entries );
+int   find_free_offset( bitvector* bv, uint32_t num_entries );
 
 seg_list_header_t* get_seg_list_header( void* ptr );
 
@@ -452,30 +453,30 @@ void insert_new_seglist( byte** free_list, void* entry )
  * 
  * @param bv           Pointer to bitvector 
  * @param num_entries  Number of valid entries in the bit vector
- * @return int         On success, offset in free list that is free
+ * @return int         On success, offset in free list that is free 
  *                     On error, -1
  * 
  * 
  */
-int find_free_offset( bitvector* bv, int num_entries )
+int find_free_offset( bitvector* bv, uint32_t num_entries )
 {
-   for ( int v = 0; v < 4; ++v )
+   for ( uint32_t v = 0u; v < 4u; ++v )
    {
-      uint64_t mask = 1;
+      uint64_t mask = 1u;
 
-      for ( int bit = 0; bit < 64; ++bit )
+      for ( uint32_t bit = 0u; bit < 64u; ++bit )
       {
-         if ( 64 * v + bit >= num_entries )
+         if ( 64u * v + bit >= num_entries )
             return -1;
 
-         int const is_free = !( ( *bv )[v] & mask );
+         uint32_t const is_free = !( ( *bv )[v] & mask );
 
          if ( is_free )
          {
             SET_BIT( ( *bv )[v], bit );
-            return v * 64 + bit;
+            return v * 64u + bit;
          }
-         mask = ( mask << 1 );
+         mask = ( mask << 1u );
       }
    }
    return -1;
@@ -492,9 +493,9 @@ int find_free_offset( bitvector* bv, int num_entries )
 seg_list_header_t* get_seg_list_header( void* ptr )
 {
    byte* const tmp          = ptr;
-   byte* const seg_lists[7] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128, free_list_269, free_list_578 };
- 
-   for ( unsigned idx = 0u; idx < sizeof( seg_lists ); ++idx )
+   byte* const seg_lists[] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128, free_list_269, free_list_578 };
+   
+   for ( unsigned idx = 0u; idx < sizeof( seg_lists ) / sizeof( seg_lists[0] ); ++idx )
    {
       byte* searcher = seg_lists[idx];
       
@@ -551,7 +552,7 @@ void* do_malloc_16()
       }
       else
       {
-         return block16 + offset * 16 + sizeof( seg_list_header_t );
+         return block16 + offset * 16u + sizeof( seg_list_header_t );
       }
    }
 }
@@ -817,9 +818,9 @@ void* do_malloc_big( size_t size )
 void do_free_big( void* ptr )
 {
   // change our allocation status
-   byte*  const bp         = ( byte* )ptr;
-   size_t const size       = GET_SIZE( HDRP( bp ) );
-   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   byte*    const bp         = ( byte* )ptr;
+   size_t   const size       = GET_SIZE( HDRP( bp ) );
+   uint32_t const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
    PUT( HDRP( bp ), PACK( size, prev_alloc, 0 ) ); 
    PUT( FTRP( bp ), PACK( size, prev_alloc, 0 ) );
@@ -953,7 +954,7 @@ void print_seglist_headers( void* ptr )
    if ( ptr == NULL )
       return;
 
-   seg_list_header_t* pheader = ptr;
+   seg_list_header_t const* pheader = ptr;
 
    while ( pheader )
    {
@@ -975,7 +976,7 @@ static void add_explicit_chunk( size_t size )
 {
    static size_t const overhead = 2 * ALIGNMENT;
 
-   size_t const chunk_size = MAX( CHUNKSIZE, size + overhead );
+   size_t const chunk_size = CHUNK_SIZE( size );
    size_t const free_size  = chunk_size - overhead;
 
    void* chunk;
@@ -1019,19 +1020,17 @@ static void add_explicit_chunk( size_t size )
  */
 static void* coalesce( void* bp )
 {
-   size_t const bp_size    = GET_SIZE( HDRP( bp ) );
-   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-   int    const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
+   size_t   const bp_size    = GET_SIZE( HDRP( bp ) );
+   uint32_t const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   uint32_t const next_alloc = GET_ALLOC( HDRP( bp + bp_size ) );
 
    if ( prev_alloc && next_alloc )                       // Case 1
    {
-      printf( "coalesce: Case 1\n" );
       return bp;
    }
 
    if ( prev_alloc && !next_alloc )                      // Case 2
    {
-      printf( "coalesce: Case 2\n" );
       byte*  const next_bp   = bp + bp_size;
       size_t const next_size = GET_SIZE( HDRP( next_bp ) );
       size_t const new_size  = bp_size + next_size;
@@ -1047,7 +1046,6 @@ static void* coalesce( void* bp )
 
    if ( !prev_alloc && next_alloc )                     // Case 3
    {
-      printf( "coalesce: Case 3\n" );
       size_t const prev_size = GET_SIZE( bp - DSIZE );
       size_t const new_size  = bp_size + prev_size;
       byte*  const prev_bp   = PREV_BLKP( bp );
@@ -1065,7 +1063,6 @@ static void* coalesce( void* bp )
 
    if ( !prev_alloc && !next_alloc )                  // Case 4
    {
-      printf( "coalesce: Case 4\n" );
       byte*  const prev_bp   = PREV_BLKP( bp );
       byte*  const next_bp   = NEXT_BLKP( bp );
       size_t const prev_size = GET_SIZE( bp - DSIZE );
@@ -1161,7 +1158,6 @@ static void* find_block( size_t block_size )
 }
 
 
-
 /**
  * @brief Place an allocated block of size bytes at the start of the free block
  *        with the block payload pointer bp and split it if the excess would be
@@ -1172,9 +1168,9 @@ static void* find_block( size_t block_size )
  */
 static void place_allocation( void* bp, size_t size )
 {
-   size_t const block_size = GET_SIZE( HDRP( bp ) );
-   int    const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-   byte*  const next_bp    = NEXT_BLKP( bp );
+   size_t   const block_size = GET_SIZE( HDRP( bp ) );
+   uint32_t const prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+   byte*    const next_bp    = NEXT_BLKP( bp );
 
    if ( block_size - size >= MIN_BIG_BLOCK )    // split block
    {
@@ -1234,10 +1230,10 @@ static void heapcheck( int verbose )
 static void check_chunk( byte* chunk, int verbose )
 {
    size_t const size = GET( chunk + DSIZE );
-   size_t total_size = 0u;
+   size_t total_size = 0ul;
 
    if ( verbose )
-      printf( "Chunk: %p, Size: %zu\n", chunk, size );
+      printf( "%p : Chunk Size: %zu \n", chunk, size );
    
    byte* bp = chunk + 24;
 
@@ -1286,14 +1282,14 @@ static void check_prologue( byte* bp, int verbose )
      
    if ( verbose )
    {
-      size_t const h_size       = GET_SIZE( HDRP( bp ) );
-      size_t const f_size       = GET_SIZE( FTRP( bp ) );
-      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-      int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
-      int    const h_alloc      = GET_ALLOC( HDRP( bp ) );
-      int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
+      size_t   const h_size       = GET_SIZE( HDRP( bp ) );
+      size_t   const f_size       = GET_SIZE( FTRP( bp ) );
+      uint32_t const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      uint32_t const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
+      uint32_t const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      uint32_t const f_alloc      = GET_ALLOC( FTRP( bp ) );
 
-      printf( "%p: Prologue: header: [%zu:%c%c] | footer: [%zu:%c%c]\n", bp, 
+      printf( "%p : Prologue: header: [%zu:%c%c] | footer: [%zu:%c%c]\n", bp, 
          h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
          f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' ) 
       );
@@ -1307,29 +1303,30 @@ static void check_prologue( byte* bp, int verbose )
  */
 static void free_list_check( int verbose )
 {
-   byte* bp   = free_list_big;
-   byte* prev = NULL;
+   byte const* bp   = free_list_big;
+   byte const* prev = NULL;
+
+   if ( verbose )
+      puts( "Explicit Free List:" );
 
    while ( bp )
    {
-      byte* const next_bp = GET_NEXT_PTR( bp );
-      byte* const prev_bp = GET_PREV_PTR( bp );
+      byte const* const next_bp = GET_NEXT_PTR( bp );
+      byte const* const prev_bp = GET_PREV_PTR( bp );
 
       if ( verbose )
       {
-         printf( "%p: next: %p, prev: %p\n", bp, next_bp, prev_bp );
+         printf( "\t%p | prev: %-14p | next: %p\n", bp, prev_bp, next_bp );
       }
 
       if ( prev != prev_bp )
       {
-         printf( "Error: Bad free list pointers\n" );
+         puts( "Error: Bad free list pointers" );
       }
 
       prev = bp;
       bp   = next_bp;
    }
-   if ( verbose )
-      puts( "" );
 }
 
 
@@ -1350,7 +1347,6 @@ static void blockcheck( void* bp )
    }
 
    size_t const h_size = GET_SIZE( HDRP( bp ) );
- 
 
    if ( h_size < MIN_BIG_BLOCK )
    {
@@ -1362,7 +1358,7 @@ static void blockcheck( void* bp )
       printf( "Error: Block size (%zu) is not %d byte aligned\n", h_size, ALIGNMENT );
    }
 
-   int const is_allocated = GET_ALLOC( HDRP( bp ) );
+   uint32_t const is_allocated = GET_ALLOC( HDRP( bp ) );
 
    if ( !is_allocated && GET( HDRP( bp ) ) != GET( FTRP( bp ) ) )
    {
@@ -1371,7 +1367,7 @@ static void blockcheck( void* bp )
 
    if ( !GET_PREV_ALLOC( HDRP( bp ) ) )
    {
-      byte* const prev_bp = PREV_BLKP( bp );
+      byte const* const prev_bp = PREV_BLKP( bp );
 
       if ( GET_ALLOC( prev_bp ) )
       {
@@ -1389,35 +1385,36 @@ static void blockcheck( void* bp )
  */
 static void printblock( void* bp )
 {
-   size_t const h_size       = GET_SIZE( HDRP( bp ) );
-   int    const is_allocated = GET_ALLOC( HDRP( bp ) );
+   size_t   const h_size       = GET_SIZE( HDRP( bp ) );
+   uint32_t const is_allocated = GET_ALLOC( HDRP( bp ) );
 
    if ( h_size == 0 )     // epilogue
    {
-      printf( "%p: Epilogue: [%zu:%c%c]\n", bp, 
+      printf( "%p : Epilogue: [%zu:%c%c]\n", bp, 
          h_size, ( GET_PREV_ALLOC( HDRP( bp ) ) ? 'a' : 'f' ), ( is_allocated ? 'a' : 'f' ) );
       return;
    }
 
    if ( is_allocated )
    {
-      int const h_alloc      = GET_ALLOC( HDRP( bp ) );
-      int const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      uint32_t const h_alloc      = GET_ALLOC( HDRP( bp ) );
+      uint32_t const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
 
-      printf( "%p: header: [%zu:%c%c]\n", bp, 
+      printf( "%p : header: [%zu:%c%c]\n", bp, 
                h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ) );
    }
    else   // free block
    {
-      size_t const f_size       = GET_SIZE( FTRP( bp ) );
-      int    const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
-      int    const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
-      int    const h_alloc      = is_allocated;
-      int    const f_alloc      = GET_ALLOC( FTRP( bp ) );
-      byte*  const next_ptr     = GET_NEXT_PTR( bp );
-      byte*  const prev_ptr     = GET_PREV_PTR( bp );
+      size_t   const f_size       = GET_SIZE( FTRP( bp ) );
+      uint32_t const h_prev_alloc = GET_PREV_ALLOC( HDRP( bp ) );
+      uint32_t const f_prev_alloc = GET_PREV_ALLOC( FTRP( bp ) );
+      uint32_t const h_alloc      = is_allocated;
+      uint32_t const f_alloc      = GET_ALLOC( FTRP( bp ) );
+      
+      byte const* const next_ptr = GET_NEXT_PTR( bp );
+      byte const* const prev_ptr = GET_PREV_PTR( bp );
 
-      printf( "%p: header: [%zu:%c%c] | next: %p | prev: %p | footer: [%zu:%c%c]\n", bp, 
+      printf( "%p : header: [%zu:%c%c] | next: %p | prev: %p | footer: [%zu:%c%c]\n", bp, 
                h_size, ( h_prev_alloc ? 'a' : 'f' ), ( h_alloc ? 'a' : 'f' ),
                next_ptr, prev_ptr, 
                f_size, ( f_prev_alloc ? 'a' : 'f' ), ( f_alloc ? 'a' : 'f' )
