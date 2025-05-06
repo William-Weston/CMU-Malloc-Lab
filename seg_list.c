@@ -155,6 +155,7 @@ static void  free_list_insert( void* bp );                // insert into free li
 static void  free_list_remove( void* bp );
 static void* find_block( size_t block_size );             // find block on free list
 static void  place_allocation( void* bp, size_t size );
+static void  merge_blocks( void* bp, void* next_bp );
 static void  heapcheck( int verbose );
 static void  check_chunk( byte* chunk, int verbose );
 static void  check_prologue( byte* bp, int verbose );
@@ -631,11 +632,11 @@ static void* do_big_realloc( void* ptr, size_t size )
    {
       free_list_remove( next_bp );
       int const prev_alloc = GET_PREV_ALLOC( HDRP( ptr ) );
-      
-      PUT( HDRP( ptr ), PACK( block_size, prev_alloc, 1 ) );
 
       if ( total_size - block_size >= MIN_BIG_BLOCK )  // we can split the following block
       {
+         PUT( HDRP( ptr ), PACK( block_size, prev_alloc, 1 ) );
+
          byte*  const split_bp  = NEXT_BLKP( ptr );
          size_t const next_size = total_size - block_size;
 
@@ -644,11 +645,15 @@ static void* do_big_realloc( void* ptr, size_t size )
 
          free_list_insert( split_bp );
       }
+      else
+      {
+         PUT( HDRP( ptr ), PACK( total_size, prev_alloc, 1 ) );
+      }
 
       return ptr;
    }
 
-   // must allocate and copy
+   // must allocate, copy and free
    void* new_ptr = mm_malloc( size );
    memcpy( new_ptr, ptr, old_size - DSIZE );
    mm_free( ptr );
@@ -952,6 +957,37 @@ static void place_allocation( void* bp, size_t size )
 
       free_list_remove( bp );
    }
+}
+
+
+/**
+ * @brief Merge adjacent blocks located on the same chunk
+ * 
+ * @param bp       First block payload pointer
+ * @param next_bp  Following block payload pointer to merge
+ */
+static void  merge_blocks( void* bp, void* next_bp )
+{
+   assert( next_bp == NEXT_BLKP( bp ) );
+
+   free_list_remove( next_bp );
+   size_t   const total_size   = GET_SIZE( HDRP( bp ) ) + GET_SIZE( HDRP( next_bp ) );
+   uint32_t const prev_alloc   = GET_PREV_ALLOC( HDRP( bp ) );
+   uint32_t const alloc        = GET_ALLOC( HDRP( bp ) );
+   void*    const following_bp = NEXT_BLKP( next_bp );
+
+   SET_PREV_ALLOC( HDRP( following_bp ) );
+   if ( !GET_ALLOC( HDRP( following_bp ) ) )
+   {
+      SET_PREV_ALLOC( FTRP( following_bp ) );
+   }
+
+   PUT( HDRP( bp ), PACK( total_size, prev_alloc, alloc ) );
+   if ( !alloc )
+   {
+      PUT( FTRP( bp ), PACK( total_size, prev_alloc, alloc ) );
+   }
+   
 }
 
 
