@@ -53,11 +53,11 @@ struct seg_list_header
 #define ALIGNMENT                    16             // Align on 16 byte boundaries
 #define MIN_BIG_BLOCK                144            // Minimum, 16 byte aligned, block size of allocation on explicit free list
 
-#define SEG16_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 16u  )
-#define SEG32_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 32u  )
-#define SEG48_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48u  )
-#define SEG64_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64u  )
-#define SEG128_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128u )
+#define SEG16_CAPACITY                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 16u  )
+#define SEG32_CAPACITY                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 32u  )
+#define SEG48_CAPACITY                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48u  )
+#define SEG64_CAPACITY                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64u  )
+#define SEG128_CAPACITY               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128u )
 
 
 // =====================================
@@ -130,7 +130,7 @@ static byte* explicit_chunk = NULL;  // pointer to chunks of memory used for exp
 static void* create_new_seglist( byte** free_list, uint32_t size );
 static void  init_seglist_header( void* ptr, uint32_t size );
 static void  insert_new_seglist( byte** free_list, void* entry );
-static int   find_free_offset( bitvector* bv, uint32_t num_entries );
+static int   find_free_offset( bitvector* bv, uint32_t capacity );
 
 static seg_list_header_t* get_seg_list_header( void* ptr );
 
@@ -204,23 +204,23 @@ void* mm_malloc( size_t size )
 
    if ( size <= 16 )
    {
-      return do_malloc( &free_list_16, 16u, SEG16_ENTRIES );
+      return do_malloc( &free_list_16, 16u, SEG16_CAPACITY );
    }
    else if( size <= 32 )
    {
-      return do_malloc( &free_list_32, 32u, SEG32_ENTRIES );
+      return do_malloc( &free_list_32, 32u, SEG32_CAPACITY );
    }
    else if ( size <= 48 )
    {
-      return do_malloc( &free_list_48, 48u, SEG48_ENTRIES );
+      return do_malloc( &free_list_48, 48u, SEG48_CAPACITY );
    }
    else if( size <= 64 )
    {
-      return do_malloc( &free_list_64, 64u, SEG64_ENTRIES );
+      return do_malloc( &free_list_64, 64u, SEG64_CAPACITY );
    }
    else if( size <= 128 )
    {
-      return do_malloc( &free_list_128, 128u, SEG128_ENTRIES );
+      return do_malloc( &free_list_128, 128u, SEG128_CAPACITY );
    }
    else   // size > 128
    {
@@ -319,6 +319,7 @@ void* mm_realloc( void* ptr, size_t size )
       {
          void* new_ptr = mm_malloc( size );
          memcpy( new_ptr, ptr, seg_listp->size );
+         mm_free( ptr );
          return new_ptr;
       }
    }
@@ -434,13 +435,13 @@ static void insert_new_seglist( byte** free_list, void* entry )
  * @brief Find the first zero bit in the bitvector and then set it to 1
  * 
  * @param bv           Pointer to bitvector 
- * @param num_entries  Number of valid entries in the bit vector
+ * @param capacity     Number of valid entries in the bit vector
  * @return int         On success, offset in free list that is free 
  *                     On error, -1
  * 
  * 
  */
-static int find_free_offset( bitvector* bv, uint32_t num_entries )
+static int find_free_offset( bitvector* bv, uint32_t capacity )
 {
    for ( uint32_t v = 0u; v < 4u; ++v )
    {
@@ -448,7 +449,7 @@ static int find_free_offset( bitvector* bv, uint32_t num_entries )
 
       for ( uint32_t bit = 0u; bit < 64u; ++bit )
       {
-         if ( 64u * v + bit >= num_entries )
+         if ( 64u * v + bit >= capacity )
             return -1;
 
          uint32_t const is_free = !( ( *bv )[v] & mask );
@@ -628,6 +629,7 @@ static void* do_big_realloc( void* ptr, size_t size )
 
    if ( !GET_ALLOC( HDRP( next_bp ) ) && block_size <= total_size )
    {
+      free_list_remove( next_bp );
       int const prev_alloc = GET_PREV_ALLOC( HDRP( ptr ) );
       
       PUT( HDRP( ptr ), PACK( block_size, prev_alloc, 1 ) );
@@ -643,7 +645,6 @@ static void* do_big_realloc( void* ptr, size_t size )
          free_list_insert( split_bp );
       }
 
-      free_list_remove( next_bp );
       return ptr;
    }
 
@@ -712,7 +713,7 @@ static void print_seglist_headers( void* ptr )
 
    while ( pheader )
    {
-      printf( "(%p)  |  Size: %3" PRIu32 " - %-3" PRIu32"  |  Next: %-18p  |  Capacity: %-d\n", 
+      printf( "(%p)  |  Size: %03" PRIu32 "-%03" PRIu32"  |  Next: %-18p  |  Capacity: %-d\n", 
                ptr, pheader->min, pheader->size, pheader->next, seg_list_capacity( pheader->size ) );
       printf( "Status: [0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 ":0x%016" PRIx64 "]\n", 
                pheader->vector[3], pheader->vector[2], pheader->vector[1], pheader->vector[0] );
