@@ -17,8 +17,8 @@
 #include <stdint.h>                   // uint32_t, uintptr_t
 #include <stdio.h>                    // printf
 #include <string.h>                   // memset
-
 #include <stdlib.h>
+
 
 // =====================================
 // Typedefs
@@ -29,6 +29,7 @@ typedef uint64_t      bitvector[4];
 
 struct seg_list_header;
 typedef struct seg_list_header seg_list_header_t;
+
 
 // =====================================
 // Types
@@ -65,7 +66,6 @@ struct seg_list_header
 // =====================================
 
 #define MAX( x, y )                  ( ( x ) > ( y ) ? ( x ) : ( y ) )  
-
 #define SET_BIT( word64, bit )       ( word64 |=  ( 1ull << bit ) )
 #define CLEAR_BIT( word64, bit )     ( word64 &= ~( 1ull << bit ) )
 
@@ -162,7 +162,6 @@ static void  check_prologue( byte* bp, int verbose );
 static void  free_list_check( int verbose );
 static void  blockcheck( void* bp );
 static void  printblock( void* bp );
-
 
 
 // =====================================
@@ -379,7 +378,6 @@ void mm_check_heap( int verbose )
 // ================================================================================================
 
 
-
 /**
  * @brief Create a new seglist object
  * 
@@ -439,8 +437,6 @@ static void insert_new_seglist( byte** free_list, void* entry )
  * @param capacity     Number of valid entries in the bit vector
  * @return int         On success, offset in free list that is free 
  *                     On error, -1
- * 
- * 
  */
 static int find_free_offset( bitvector* bv, uint32_t capacity )
 {
@@ -499,6 +495,14 @@ static seg_list_header_t* get_seg_list_header( void* ptr )
 }
 
 
+/**
+ * @brief Malloc implementation using segregated free list
+ * 
+ * @param seg_list Seg list on which to allocate
+ * @param size     Size class of allocation
+ * @param capacity Capacity of segregated free list
+ * @return void*   Pointer to allocated memory
+ */
 static void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity )
 {
    if ( *seg_list == NULL )
@@ -630,26 +634,8 @@ static void* do_big_realloc( void* ptr, size_t size )
 
    if ( !GET_ALLOC( HDRP( next_bp ) ) && block_size <= total_size )
    {
-      free_list_remove( next_bp );
-      int const prev_alloc = GET_PREV_ALLOC( HDRP( ptr ) );
-
-      if ( total_size - block_size >= MIN_BIG_BLOCK )  // we can split the following block
-      {
-         PUT( HDRP( ptr ), PACK( block_size, prev_alloc, 1 ) );
-
-         byte*  const split_bp  = NEXT_BLKP( ptr );
-         size_t const next_size = total_size - block_size;
-
-         PUT( HDRP( split_bp ), PACK( next_size, 1, 0 ) );
-         PUT( FTRP( split_bp ), PACK( next_size, 1, 0 ) );
-
-         free_list_insert( split_bp );
-      }
-      else
-      {
-         PUT( HDRP( ptr ), PACK( total_size, prev_alloc, 1 ) );
-      }
-
+      merge_blocks( ptr, next_bp );
+      place_allocation( ptr, block_size );
       return ptr;
    }
 
@@ -762,7 +748,6 @@ static void add_explicit_chunk( size_t size )
    
    free_list_insert( free_bp );
 }
-
 
 
 /**
@@ -963,31 +948,24 @@ static void place_allocation( void* bp, size_t size )
 /**
  * @brief Merge adjacent blocks located on the same chunk
  * 
- * @param bp       First block payload pointer
- * @param next_bp  Following block payload pointer to merge
+ * @param bp       First block payload pointer (allocated)
+ * @param next_bp  Following block payload pointer to merge (free)
  */
 static void  merge_blocks( void* bp, void* next_bp )
 {
+   assert( GET_ALLOC( HDRP( bp ) ) );
    assert( next_bp == NEXT_BLKP( bp ) );
+   assert( !GET_ALLOC( HDRP( next_bp ) ) );
 
    free_list_remove( next_bp );
    size_t   const total_size   = GET_SIZE( HDRP( bp ) ) + GET_SIZE( HDRP( next_bp ) );
    uint32_t const prev_alloc   = GET_PREV_ALLOC( HDRP( bp ) );
-   uint32_t const alloc        = GET_ALLOC( HDRP( bp ) );
    void*    const following_bp = NEXT_BLKP( next_bp );
 
-   SET_PREV_ALLOC( HDRP( following_bp ) );
-   if ( !GET_ALLOC( HDRP( following_bp ) ) )
-   {
-      SET_PREV_ALLOC( FTRP( following_bp ) );
-   }
-
-   PUT( HDRP( bp ), PACK( total_size, prev_alloc, alloc ) );
-   if ( !alloc )
-   {
-      PUT( FTRP( bp ), PACK( total_size, prev_alloc, alloc ) );
-   }
-   
+   assert( GET_ALLOC( HDRP( following_bp ) ) );
+   SET_PREV_ALLOC( HDRP( following_bp ) );   // following block must be allocated if next is free
+  
+   PUT( HDRP( bp ), PACK( total_size, prev_alloc, 1 ) );
 }
 
 
@@ -1011,6 +989,7 @@ static void heapcheck( int verbose )
 
    free_list_check( verbose );
 }
+
 
 /**
  * @brief Check the chunk for consistency
@@ -1087,6 +1066,7 @@ static void check_prologue( byte* bp, int verbose )
    }
 }
 
+
 /**
  * @brief Consistency check of free_list
  * 
@@ -1119,7 +1099,6 @@ static void free_list_check( int verbose )
       bp   = next_bp;
    }
 }
-
 
 
 /**
@@ -1166,7 +1145,6 @@ static void blockcheck( void* bp )
       }
    }
 }
-
 
 
 /**

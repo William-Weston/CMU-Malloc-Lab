@@ -54,8 +54,8 @@ int main()
    // puts( "\n-------------------- malloc_align ------------------\n" );
    // malloc_align_test();
 
-   // puts( "\n--------------------- realloc0 ---------------------\n" );
-   // realloc_test0();
+   puts( "\n--------------------- realloc0 ---------------------\n" );
+   realloc_test0();
 
    puts( "\n--------------------- realloc1 ---------------------\n" );
    realloc_test1();
@@ -441,6 +441,14 @@ void realloc_test0()
    assert( ( uintptr_t )cp5 % 16 == 0 );
   
    mm_check_heap( 1 );
+
+   mm_free( cp1 );
+   mm_free( cp3 );
+   mm_free( cp4 );
+   mm_free( cp5 );
+   mm_free( cp7 );
+   mm_check_heap( 1 );
+
    mem_deinit();
 }
 
@@ -467,6 +475,7 @@ void realloc_test1()
    assert( ( uintptr_t )cp6 % 16 == 0 );
 
    mm_free( cp4 );
+   cp4 = NULL;
 
    mm_check_heap( 1 );
 
@@ -480,10 +489,17 @@ void realloc_test1()
 
    mm_check_heap( 1 );
 
-
    cp3 = mm_realloc( cp3, 304 );
    assert( ( uintptr_t )cp3 % 16 == 0 );
 
+   mm_check_heap( 1 );
+
+   mm_free( cp0 );
+   mm_free( cp1 );
+   mm_free( cp2 );
+   mm_free( cp3 );
+   mm_free( cp5 );
+   mm_free( cp6 );
    mm_check_heap( 1 );
 
    mem_deinit();
