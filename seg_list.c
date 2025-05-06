@@ -43,7 +43,6 @@ struct seg_list_header
 };
 
 
-
 // =====================================
 // Constants
 // =====================================
@@ -52,15 +51,13 @@ struct seg_list_header
 #define DSIZE                        8              // Double word size (bytes)
 #define CHUNKSIZE                    ( 1u << 12u )  // Extend heap by this amount (bytes)
 #define ALIGNMENT                    16             // Align on 16 byte boundaries
-#define MIN_BIG_BLOCK                592            // Minimum block size of allocation on explicit free list
+#define MIN_BIG_BLOCK                144            // Minimum, 16 byte aligned, block size of allocation on explicit free list
 
 #define SEG16_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 16u  )
 #define SEG32_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 32u  )
 #define SEG48_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 48u  )
 #define SEG64_ENTRIES                ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 64u  )
 #define SEG128_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 128u )
-#define SEG269_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 269u )
-#define SEG578_ENTRIES               ( ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / 578u )
 
 
 // =====================================
@@ -71,6 +68,7 @@ struct seg_list_header
 
 #define SET_BIT( word64, bit )       ( word64 |=  ( 1ull << bit ) )
 #define CLEAR_BIT( word64, bit )     ( word64 &= ~( 1ull << bit ) )
+
 
 // ---------------------------------------
 // Macros to implement explicit free list
@@ -116,16 +114,13 @@ struct seg_list_header
 // Private Global Variables
 // =====================================
 
-static byte* free_list_16  = NULL;               // sizes 1 to 16
-static byte* free_list_32  = NULL;               // sizes 17 to 32
-static byte* free_list_48  = NULL;               // sizes 33 to 48
-static byte* free_list_64  = NULL;               // sizes 49 to 64
-static byte* free_list_128 = NULL;               // sizes 65 to 128
-static byte* free_list_269 = NULL;               // sizes 129 to 269
-static byte* free_list_578 = NULL;               // sizes 257 to 578
-static byte* free_list_big = NULL;               // sizes > 578      - implemented as explicit free list
-
-static byte* explicit_chunk = NULL;              // pointer to chunks of memory used for explicit free list
+static byte* free_list_16   = NULL;  // sizes 1 to 16
+static byte* free_list_32   = NULL;  // sizes 17 to 32
+static byte* free_list_48   = NULL;  // sizes 33 to 48
+static byte* free_list_64   = NULL;  // sizes 49 to 64
+static byte* free_list_128  = NULL;  // sizes 65 to 128
+static byte* free_list_big  = NULL;  // sizes > 128      - implemented as explicit free list
+static byte* explicit_chunk = NULL;  // pointer to chunks of memory used for explicit free list
 
 
 // =====================================
@@ -166,6 +161,8 @@ static void  free_list_check( int verbose );
 static void  blockcheck( void* bp );
 static void  printblock( void* bp );
 
+
+
 // =====================================
 // Public Function Definitions
 // =====================================
@@ -178,15 +175,15 @@ static void  printblock( void* bp );
  */
 int mm_init( void )
 {
-   assert( sizeof( seg_list_header_t) == 48u );
+   assert( sizeof( seg_list_header_t ) == 48u );
 
-   free_list_16  = NULL;
-   free_list_32  = NULL;
-   free_list_48  = NULL;
-   free_list_64  = NULL;
-   free_list_128 = NULL;
-   free_list_578 = NULL;
-   free_list_big = NULL;
+   free_list_16   = NULL;
+   free_list_32   = NULL;
+   free_list_48   = NULL;
+   free_list_64   = NULL;
+   free_list_128  = NULL;
+   free_list_big  = NULL;
+   explicit_chunk = NULL;
 
    return 0;
 }
@@ -224,15 +221,7 @@ void* mm_malloc( size_t size )
    {
       return do_malloc( &free_list_128, 128u, SEG128_ENTRIES );
    }
-   else if( size <= 269 )
-   {
-      return do_malloc( &free_list_269, 269u, SEG269_ENTRIES );
-   }
-   else if( size <= 578 )
-   {
-      return do_malloc( &free_list_578, 578u, SEG578_ENTRIES );
-   }
-   else   // size > 578
+   else   // size > 128
    {
       return do_malloc_big( size );
    }
@@ -376,8 +365,6 @@ void mm_check_heap( int verbose )
       print_seglist_headers( free_list_48 );
       print_seglist_headers( free_list_64 );
       print_seglist_headers( free_list_128 );
-      print_seglist_headers( free_list_269 );
-      print_seglist_headers( free_list_578 );
   }
 
   heapcheck( verbose );
@@ -487,7 +474,7 @@ int find_free_offset( bitvector* bv, uint32_t num_entries )
 seg_list_header_t* get_seg_list_header( void* ptr )
 {
    byte* const tmp          = ptr;
-   byte* const seg_lists[] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128, free_list_269, free_list_578 };
+   byte* const seg_lists[] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128 };
    
    for ( unsigned idx = 0u; idx < sizeof( seg_lists ) / sizeof( seg_lists[0] ); ++idx )
    {
@@ -614,6 +601,10 @@ void do_free_big( void* ptr )
  * @param size    number of bytes to allocate
  * @return void*  On success, returns the pointer to the beginning of newly allocated memory.
  *                On error, returns a null pointer
+ * 
+ * TODO: fix bugs
+ *         - case where new size is less than min size of big allocations
+ *         - alignment issues?
  */
 void* do_big_realloc( void* ptr, size_t size )
 {
@@ -699,15 +690,9 @@ inline uint32_t seg_list_min_size( uint32_t size )
 
    case 128:
       return 65u;
-   
-   case 269:
-      return 129u;
-
-   case 578:
-      return 270u;
       
    default:
-      return 579u;
+      return 129u;
    }
 }
 
