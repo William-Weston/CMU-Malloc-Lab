@@ -11,7 +11,9 @@
 #include "memlib.h"
 #include "mm.h"
 
+#include <assert.h>
 #include <stdlib.h>    // EXIT_SUCCESS
+#include <stdint.h>
 #include <stdio.h>     // puts
 
 void malloc_test();
@@ -21,29 +23,42 @@ void malloc_test3();
 void malloc_test4();
 void malloc_test5();
 void malloc_test6();   // big malloc
+void malloc_align_test();
+
+void realloc_test0();
+void realloc_test1();
 
 int main()
 {
-   puts( "\n------------------------ malloc0 --------------------\n" );
-   malloc_test();
+   // puts( "\n------------------------ malloc0 --------------------\n" );
+   // malloc_test();
 
-   puts( "\n----------------------- malloc1 --------------------\n" );
-   malloc_test1();
+   // puts( "\n----------------------- malloc1 --------------------\n" );
+   // malloc_test1();
 
-   puts( "\n----------------------- malloc2 --------------------\n" );
-   malloc_test2();
+   // puts( "\n----------------------- malloc2 --------------------\n" );
+   // malloc_test2();
 
-   puts( "\n----------------------- malloc3 --------------------\n" );
-   malloc_test3();
+   // puts( "\n----------------------- malloc3 --------------------\n" );
+   // malloc_test3();
 
-   puts( "\n----------------------- malloc4 --------------------\n" );
-   malloc_test4();
+   // puts( "\n----------------------- malloc4 --------------------\n" );
+   // malloc_test4();
 
-   puts( "\n----------------------- malloc5 --------------------\n" );
-   malloc_test5();
+   // puts( "\n----------------------- malloc5 --------------------\n" );
+   // malloc_test5();
 
-   puts( "\n----------------------- malloc6 --------------------\n" );
-   malloc_test6();
+   // puts( "\n----------------------- malloc6 --------------------\n" );
+   // malloc_test6();
+
+   // puts( "\n-------------------- malloc_align ------------------\n" );
+   // malloc_align_test();
+
+   // puts( "\n--------------------- realloc0 ---------------------\n" );
+   // realloc_test0();
+
+   puts( "\n--------------------- realloc1 ---------------------\n" );
+   realloc_test1();
 
    return EXIT_SUCCESS;
 }
@@ -148,6 +163,7 @@ void malloc_test2()
 {
    mem_init();
    mm_init();
+
    char* cpa[1000];
 
    for ( int count = 0; count < 1000; ++count )
@@ -331,6 +347,142 @@ void malloc_test6()
    mm_free( cp2 );
    mm_free( cp3 );
    mm_free( cp4 );
+
+   mm_check_heap( 1 );
+
+   mem_deinit();
+}
+
+
+void malloc_align_test()
+{
+   mem_init();
+   mm_init();
+
+   char* cp[100];
+
+   for ( int idx = 0, size = 16; idx < 100; ++idx, size += 16 )
+   {
+      cp[idx] = mm_malloc( size );
+   }
+
+   mm_check_heap( 1 );
+
+   for ( int idx = 0; idx < 100; ++idx )
+   {
+      assert( ( uintptr_t )(cp[idx] ) % 16 == 0 );
+   }
+
+   for ( int idx = 0; idx < 100; ++idx )
+   {
+      mm_free( cp[idx] );
+   }
+
+   mm_check_heap( 1 );
+
+   char* cp2 = mm_malloc( 129 );
+   assert( ( uintptr_t )cp2 % 16 == 0 );
+
+   char* cp3 = mm_malloc( 129 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
+
+   mm_check_heap( 1 );
+
+   mm_free( cp2 );
+   mm_free( cp3 );
+
+   mem_deinit();
+}
+
+
+void realloc_test0()
+{
+   mem_init();
+   mm_init();
+
+   char* cp0 = mm_realloc( NULL, 129 );
+   assert( ( uintptr_t )cp0 % 16 == 0 );
+
+   char* cp1 = mm_realloc( cp0, 8 );
+   assert( ( uintptr_t )cp1 % 16 == 0 );
+   assert( cp1 == cp0 );
+
+   char* cp2 = mm_realloc( NULL, 1 );
+   assert( ( uintptr_t )cp2 % 16 == 0 );
+
+   char* cp3 = mm_realloc( cp2, 15 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
+   assert( cp3 == cp2 );
+
+   char* cp4 = mm_realloc( NULL, 16 );
+   assert( ( uintptr_t )cp4 % 16 == 0 );
+
+   cp4 = mm_realloc( cp4, 32 );
+   assert( ( uintptr_t )cp4 % 16 == 0 );
+
+   cp4 = mm_realloc( cp4, 256 );
+   assert( ( uintptr_t )cp4 % 16 == 0 );
+
+   char* cp5 = mm_realloc( NULL, 252 );
+   assert( ( uintptr_t )cp5 % 16 == 0 );
+
+   mm_check_heap( 1 );
+
+   char* cp6 = mm_realloc( cp5, 256 );
+   assert( ( uintptr_t )cp6 % 16 == 0 );
+   assert( cp6 == cp5 );
+
+   char* cp7 = mm_realloc( NULL, 144 );
+   assert( ( uintptr_t )cp7 % 16 == 0 );
+
+   mm_free( cp6 );
+
+   cp5 = mm_realloc( NULL, 272 );
+   assert( ( uintptr_t )cp5 % 16 == 0 );
+  
+   mm_check_heap( 1 );
+   mem_deinit();
+}
+
+
+void realloc_test1()
+{
+   mem_init();
+   mm_init();
+
+   char* cp0 = mm_realloc( NULL, 256 );
+   char* cp1 = mm_realloc( NULL, 256 );
+   char* cp2 = mm_realloc( NULL, 256 );
+   char* cp3 = mm_realloc( NULL, 256 );
+   char* cp4 = mm_realloc( NULL, 172 );
+   char* cp5 = mm_realloc( NULL, 256 );
+   char* cp6 = mm_realloc( NULL, 256 );
+
+   assert( ( uintptr_t )cp0 % 16 == 0 );
+   assert( ( uintptr_t )cp1 % 16 == 0 );
+   assert( ( uintptr_t )cp2 % 16 == 0 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
+   assert( ( uintptr_t )cp4 % 16 == 0 );
+   assert( ( uintptr_t )cp5 % 16 == 0 );
+   assert( ( uintptr_t )cp6 % 16 == 0 );
+
+   mm_free( cp4 );
+
+   mm_check_heap( 1 );
+
+   cp3 = mm_realloc( cp3, 270 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
+
+   mm_check_heap( 1 );
+
+   cp3 = mm_realloc( cp3, 300 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
+
+   mm_check_heap( 1 );
+
+
+   cp3 = mm_realloc( cp3, 304 );
+   assert( ( uintptr_t )cp3 % 16 == 0 );
 
    mm_check_heap( 1 );
 
