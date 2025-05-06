@@ -127,22 +127,23 @@ static byte* explicit_chunk = NULL;  // pointer to chunks of memory used for exp
 // Private Function Prototypes
 // =====================================
 
-void* create_new_seglist( byte** free_list, uint32_t size );
-void  init_seglist_header( void* ptr, uint32_t size );
-void  insert_new_seglist( byte** free_list, void* entry );
-int   find_free_offset( bitvector* bv, uint32_t num_entries );
+static void* create_new_seglist( byte** free_list, uint32_t size );
+static void  init_seglist_header( void* ptr, uint32_t size );
+static void  insert_new_seglist( byte** free_list, void* entry );
+static int   find_free_offset( bitvector* bv, uint32_t num_entries );
 
-seg_list_header_t* get_seg_list_header( void* ptr );
+static seg_list_header_t* get_seg_list_header( void* ptr );
 
-void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity );
-void* do_malloc_big( size_t size );
-void  do_free_big( void* ptr );
-void* do_big_realloc( void* ptr, size_t size );
+static void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity );
+static void* do_malloc_big( size_t size );
+static void  do_free_big( void* ptr );
+static void* do_big_realloc( void* ptr, size_t size );
 
-inline int      seg_list_capacity( uint32_t size );
-inline uint32_t seg_list_min_size( uint32_t size );
+static inline int      seg_list_capacity( uint32_t size );
+static inline uint32_t seg_list_min_size( uint32_t size );
 
-void  print_seglist_headers( void* ptr );
+static void  print_seglist_headers( void* ptr );
+
 
 // ----------------------------------
 // Functions for explicit free list
@@ -384,7 +385,7 @@ void mm_check_heap( int verbose )
  * @return void*      On success, pointer to newly allocated 4K block initialized as a seg list
  *                    On error, NULL
  */
-void* create_new_seglist( byte** free_list, uint32_t size )
+static void* create_new_seglist( byte** free_list, uint32_t size )
 {
    void* new_chunk;  
    
@@ -405,7 +406,7 @@ void* create_new_seglist( byte** free_list, uint32_t size )
  * 
  * @param ptr Pointer to 4K block for seg list
  */
-void init_seglist_header( void* ptr, uint32_t size )
+static void init_seglist_header( void* ptr, uint32_t size )
 {
    seg_list_header_t const tmp = { .next = NULL, .vector = { 0, 0, 0, 0 }, 
                                    .size = size, .min    = seg_list_min_size( size ) };
@@ -420,7 +421,7 @@ void init_seglist_header( void* ptr, uint32_t size )
  * @param free_list The free list to insert into
  * @param entry     The new seg list to insert
  */
-void insert_new_seglist( byte** free_list, void* entry )
+static void insert_new_seglist( byte** free_list, void* entry )
 {
    seg_list_header_t* const header = entry;
    
@@ -439,7 +440,7 @@ void insert_new_seglist( byte** free_list, void* entry )
  * 
  * 
  */
-int find_free_offset( bitvector* bv, uint32_t num_entries )
+static int find_free_offset( bitvector* bv, uint32_t num_entries )
 {
    for ( uint32_t v = 0u; v < 4u; ++v )
    {
@@ -471,7 +472,7 @@ int find_free_offset( bitvector* bv, uint32_t num_entries )
  * @return seg_list_header_t*  On success, pointer to seg list
  *                             On failure, NULL
  */
-seg_list_header_t* get_seg_list_header( void* ptr )
+static seg_list_header_t* get_seg_list_header( void* ptr )
 {
    byte* const tmp          = ptr;
    byte* const seg_lists[] = { free_list_16, free_list_32, free_list_48, free_list_64, free_list_128 };
@@ -496,7 +497,7 @@ seg_list_header_t* get_seg_list_header( void* ptr )
 }
 
 
-void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity )
+static void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity )
 {
    if ( *seg_list == NULL )
    {
@@ -542,7 +543,7 @@ void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity )
  * @return void*  On success, returns a pointer to begining of allocated memory
  *                On error, returns a null pointer
  */
-void* do_malloc_big( size_t size )
+static void* do_malloc_big( size_t size )
 {
    if ( size == 0 )
       return NULL;
@@ -570,7 +571,7 @@ void* do_malloc_big( size_t size )
  * 
  * @param ptr   Pointer to free
  */
-void do_free_big( void* ptr )
+static void do_free_big( void* ptr )
 {
   // change our allocation status
    byte*    const bp         = ( byte* )ptr;
@@ -606,7 +607,7 @@ void do_free_big( void* ptr )
  *         - case where new size is less than min size of big allocations
  *         - alignment issues?
  */
-void* do_big_realloc( void* ptr, size_t size )
+static void* do_big_realloc( void* ptr, size_t size )
 {
    size_t const block_size = BLOCK_SIZE( size );
    size_t const old_size   = GET_SIZE( HDRP( ptr ) );
@@ -660,7 +661,7 @@ void* do_big_realloc( void* ptr, size_t size )
  * @param size   The maximum size stored on the seg list
  * @return int   The maximum number allocations the seg list can hold
  */
-inline int seg_list_capacity( uint32_t size )
+static inline int seg_list_capacity( uint32_t size )
 {
    return ( CHUNKSIZE - sizeof( seg_list_header_t ) ) / size;
 }
@@ -672,7 +673,7 @@ inline int seg_list_capacity( uint32_t size )
  * @param size       The maximum size held in the seg list
  * @return uint32_t  The minimum size held in the seg list
  */
-inline uint32_t seg_list_min_size( uint32_t size )
+static inline uint32_t seg_list_min_size( uint32_t size )
 {
    switch ( size )
    {
@@ -702,7 +703,7 @@ inline uint32_t seg_list_min_size( uint32_t size )
  * 
  * @param ptr Pointer to start of seg list
  */
-void print_seglist_headers( void* ptr )
+static void print_seglist_headers( void* ptr )
 {
    if ( ptr == NULL )
       return;
