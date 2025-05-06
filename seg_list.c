@@ -132,20 +132,14 @@ static byte* explicit_chunk = NULL;              // pointer to chunks of memory 
 // Private Function Prototypes
 // =====================================
 
-void* create_new_seglist( byte** free_list, int size );
-void  init_seglist_header( void* ptr, int size );
+void* create_new_seglist( byte** free_list, uint32_t size );
+void  init_seglist_header( void* ptr, uint32_t size );
 void  insert_new_seglist( byte** free_list, void* entry );
 int   find_free_offset( bitvector* bv, uint32_t num_entries );
 
 seg_list_header_t* get_seg_list_header( void* ptr );
 
-void* do_malloc_16();
-void* do_malloc_32();
-void* do_malloc_48();
-void* do_malloc_64();
-void* do_malloc_128();
-void* do_malloc_269();
-void* do_malloc_578();
+void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity );
 void* do_malloc_big( size_t size );
 void  do_free_big( void* ptr );
 void* do_big_realloc( void* ptr, size_t size );
@@ -212,31 +206,31 @@ void* mm_malloc( size_t size )
 
    if ( size <= 16 )
    {
-      return do_malloc_16();
+      return do_malloc( &free_list_16, 16u, SEG16_ENTRIES );
    }
    else if( size <= 32 )
    {
-      return do_malloc_32();
+      return do_malloc( &free_list_32, 32u, SEG32_ENTRIES );
    }
    else if ( size <= 48 )
    {
-      return do_malloc_48();
+      return do_malloc( &free_list_48, 48u, SEG48_ENTRIES );
    }
    else if( size <= 64 )
    {
-      return do_malloc_64();
+      return do_malloc( &free_list_64, 64u, SEG64_ENTRIES );
    }
    else if( size <= 128 )
    {
-      return do_malloc_128();
+      return do_malloc( &free_list_128, 128u, SEG128_ENTRIES );
    }
    else if( size <= 269 )
    {
-      return do_malloc_269();
+      return do_malloc( &free_list_269, 269u, SEG269_ENTRIES );
    }
    else if( size <= 578 )
    {
-      return do_malloc_578();
+      return do_malloc( &free_list_578, 578u, SEG578_ENTRIES );
    }
    else   // size > 578
    {
@@ -403,7 +397,7 @@ void mm_check_heap( int verbose )
  * @return void*      On success, pointer to newly allocated 4K block initialized as a seg list
  *                    On error, NULL
  */
-void* create_new_seglist( byte** free_list, int size )
+void* create_new_seglist( byte** free_list, uint32_t size )
 {
    void* new_chunk;  
    
@@ -424,7 +418,7 @@ void* create_new_seglist( byte** free_list, int size )
  * 
  * @param ptr Pointer to 4K block for seg list
  */
-void init_seglist_header( void* ptr, int size )
+void init_seglist_header( void* ptr, uint32_t size )
 {
    seg_list_header_t const tmp = { .next = NULL, .vector = { 0, 0, 0, 0 }, 
                                    .size = size, .min    = seg_list_min_size( size ) };
@@ -515,266 +509,40 @@ seg_list_header_t* get_seg_list_header( void* ptr )
 }
 
 
-/**
- * @brief Handle allocations of size 16 bytes and less
- * 
- * @param size    Requested size
- * @return void*  Pointer to allocated memory
- */
-void* do_malloc_16()
+void* do_malloc( byte** seg_list, uint32_t size, uint32_t capacity )
 {
-   if ( free_list_16 == NULL )
+   if ( *seg_list == NULL )
    {
-      if ( create_new_seglist( &free_list_16, 16 ) == NULL )
+      if ( create_new_seglist( seg_list, size ) == NULL )
       {
-         return NULL;   // can't allocate
+         return NULL;
       }
    }
 
-   byte* block16 = free_list_16;
+   byte* blockp = *seg_list;
 
    while ( 1 )
    {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block16;
-      int                const offset  = find_free_offset( &pheader->vector, SEG16_ENTRIES );  
+      seg_list_header_t* const pheader = ( seg_list_header_t* )blockp;
+      int                const offset  = find_free_offset( &pheader->vector, capacity );
 
       if ( offset == -1 )
       {
          if ( pheader->next )
          {
-            block16 = ( byte* )pheader->next;
+            blockp = ( byte* )pheader->next;
          }
          else
          {
-            if ( ( block16 = create_new_seglist( &free_list_16, 16 ) ) == NULL  )
+            if ( ( blockp = create_new_seglist( seg_list, size ) ) == NULL )
+            {
                return NULL;
+            }
          }
       }
       else
       {
-         return block16 + offset * 16u + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_32()
-{
-   if ( free_list_32 == NULL )
-   {
-      if ( create_new_seglist( &free_list_32, 32 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block32 = free_list_32;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block32;
-      int                const offset  = find_free_offset( &pheader->vector, SEG32_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block32 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block32 = create_new_seglist( &free_list_32, 32 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block32 + offset * 32 + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_48()
-{
-   if ( free_list_48 == NULL )
-   {
-      if ( create_new_seglist( &free_list_48, 48 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block48 = free_list_48;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block48;
-      int                const offset  = find_free_offset( &pheader->vector, SEG48_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block48 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block48 = create_new_seglist( &free_list_48, 48 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block48 + offset * 48 + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_64()
-{
-   if ( free_list_64 == NULL )
-   {
-      if ( create_new_seglist( &free_list_64, 64 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block64 = free_list_64;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block64;
-      int                const offset  = find_free_offset( &pheader->vector, SEG64_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block64 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block64 = create_new_seglist( &free_list_64, 64 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block64 + offset * 64 + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_128()
-{
-   if ( free_list_128 == NULL )
-   {
-      if ( create_new_seglist( &free_list_128, 128 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block128 = free_list_128;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block128;
-      int                const offset  = find_free_offset( &pheader->vector, SEG128_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block128 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block128 = create_new_seglist( &free_list_128, 128 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block128 + offset * 128 + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_269()
-{
-   if ( free_list_269 == NULL )
-   {
-      if ( create_new_seglist( &free_list_269, 269 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block269 = free_list_269;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block269;
-      int                const offset  = find_free_offset( &pheader->vector, SEG269_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block269 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block269 = create_new_seglist( &free_list_269, 269 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block269 + offset * 269 + sizeof( seg_list_header_t );
-      }
-   }
-}
-
-
-void* do_malloc_578()
-{
-   if ( free_list_578 == NULL )
-   {
-      if ( create_new_seglist( &free_list_578, 578 ) == NULL )
-      {
-         return NULL;   // can't allocate
-      }
-   }
-
-   byte* block578 = free_list_578;
-
-   while ( 1 )
-   {
-      seg_list_header_t* const pheader = ( seg_list_header_t* )block578;
-      int                const offset  = find_free_offset( &pheader->vector, SEG578_ENTRIES );  
-
-      if ( offset == -1 )
-      {
-         if ( pheader->next )
-         {
-            block578 = ( byte* )pheader->next;
-         }
-         else
-         {
-            if ( ( block578 = create_new_seglist( &free_list_578, 578 ) ) == NULL  )
-               return NULL;
-         }
-      }
-      else
-      {
-         return block578 + offset * 578 + sizeof( seg_list_header_t );
+         return blockp + offset * size + sizeof( seg_list_header_t );
       }
    }
 }

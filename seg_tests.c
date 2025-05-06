@@ -117,7 +117,7 @@ void malloc_test1()
    mm_init();
    mm_check_heap( 1 );
 
-   char* cp = mm_malloc( 512 );
+   char* cp  = mm_malloc( 512 );
    char* cp1 = mm_malloc( 512 );
    char* cp2 = mm_malloc( 512 );
    char* cp3 = mm_malloc( 512 );
